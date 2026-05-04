@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import SearchForm from "@/components/SearchForm";
 import RouteCard from "@/components/RouteCard";
 import RouteDetail from "@/components/RouteDetail";
-import { ClientRoute, odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes, collectTransferStations, RealtimeArrivals } from "@/lib/odsay-client";
+import { ClientRoute, odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes, collectTransferPoints, RealtimeArrivals } from "@/lib/odsay-client";
 
 export default function HomePage() {
   const [routes, setRoutes] = useState<ClientRoute[]>([]);
@@ -50,10 +50,12 @@ export default function HomePage() {
       if (paths.length === 0) { setError("경로를 찾을 수 없습니다."); return; }
 
       // 3. 환승 역 실시간 대기시간 (서버에서 처리)
-      const transferStations = collectTransferStations(paths);
+      const transferPoints = collectTransferPoints(paths);
       let arrivals: RealtimeArrivals = {};
-      if (transferStations.length > 0) {
-        const rtRes = await fetch(`/api/realtime-multi?stations=${transferStations.join(",")}`);
+      if (transferPoints.length > 0) {
+        const uniqueNames = [...new Set(transferPoints.map((p) => p.stationName))];
+        const encoded = uniqueNames.map((n) => encodeURIComponent(n)).join(",");
+        const rtRes = await fetch(`/api/realtime-multi?stations=${encoded}`);
         if (rtRes.ok) ({ arrivals } = await rtRes.json() as { arrivals: RealtimeArrivals });
       }
 

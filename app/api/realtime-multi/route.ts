@@ -11,7 +11,10 @@ export interface RealtimeMultiResponse {
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const stations = (searchParams.get("stations") ?? "").split(",").filter(Boolean);
+  const stations = (searchParams.get("stations") ?? "")
+    .split(",")
+    .map((s) => { try { return decodeURIComponent(s); } catch { return s; } })
+    .filter(Boolean);
 
   const arrivals: RealtimeMultiResponse["arrivals"] = {};
 
