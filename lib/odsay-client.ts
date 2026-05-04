@@ -1,5 +1,4 @@
-import { ClientRoute, ClientSubPath } from "@/app/api/find-route/route";
-import { RealtimeMultiResponse } from "@/app/api/realtime-multi/route";
+"use client";
 
 const ODSAY_BASE = "https://api.odsay.com/v1/api";
 
@@ -10,7 +9,35 @@ const LINE_COLORS: Record<number, string> = {
   109: "#FABE00", 110: "#D4003B", 112: "#B0CE18", 113: "#8BCBC8",
 };
 
-// ─── ODsay types ──────────────────────────────────────────────────────────────
+// ─── Types (no server imports) ────────────────────────────────────────────────
+
+export interface ClientSubPath {
+  trafficType: number;
+  sectionTime: number;
+  stationCount?: number;
+  startName: string;
+  endName: string;
+  lineName?: string;
+  lineCode?: number;
+  lineColor?: string;
+  direction?: string;
+  stations?: { index: number; name: string; id: string }[];
+  realtimeWaitMinutes?: number | null;
+  realtimeArrivalMsg?: string;
+}
+
+export interface ClientRoute {
+  totalMinutes: number;
+  adjustedTotalMinutes: number;
+  transferCount: number;
+  stationCount: number;
+  cost: number;
+  segments: ClientSubPath[];
+  label?: string;
+  isRealtimeEnhanced: boolean;
+}
+
+export type RealtimeArrivals = Record<string, { subwayId: string; waitMinutes: number; msg: string }[]>;
 
 interface OdsayStation {
   stationID: number;
@@ -32,23 +59,25 @@ interface OdsaySubPath {
 
 interface OdsayPath {
   pathType: number;
-  info: { totalTime: number; transferCount: number; totalStationCount: number; payment: number; firstStartStation: string; lastEndStation: string };
+  info: { totalTime: number; transferCount: number; totalStationCount: number; payment: number };
   subPath: OdsaySubPath[];
 }
 
-// ─── API call (browser — Origin header set automatically) ─────────────────────
+// ─── ODsay API (browser fetch — Origin header sent automatically) ─────────────
 
-async function odsayFetch<T>(endpoint: string, params: Record<string, string>, apiKey: string): Promise<T> {
+async function odsayGet<T>(endpoint: string, params: Record<string, string>, apiKey: string): Promise<T> {
   const qs = new URLSearchParams(params).toString();
   const url = `${ODSAY_BASE}/${endpoint}?${qs}&apiKey=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url);
+  if (!res.ok) throw new Error(`ODsay HTTP ${res.status}`);
   const data = await res.json() as { result?: T; error?: unknown };
   if (data.error) throw new Error(`ODsay: ${JSON.stringify(data.error)}`);
-  return data.result as T;
+  if (!data.result) throw new Error("ODsay: 결과가 없습니다");
+  return data.result;
 }
 
 export async function odsaySearchStation(name: string, apiKey: string): Promise<OdsayStation[]> {
-  const r = await odsayFetch<{ station?: OdsayStation[] }>(
+  const r = await odsayGet<{ station?: OdsayStation[] }>(
     "searchStation", { lang: "0", stationName: name, stationType: "1" }, apiKey
   );
   return r.station ?? [];
@@ -57,7 +86,7 @@ export async function odsaySearchStation(name: string, apiKey: string): Promise<
 export async function odsaySearchRoutes(
   sx: number, sy: number, ex: number, ey: number, apiKey: string
 ): Promise<OdsayPath[]> {
-  const r = await odsayFetch<{ path?: OdsayPath[] }>(
+  const r = await odsayGet<{ path?: OdsayPath[] }>(
     "searchPubTransPathT",
     { SX: String(sx), SY: String(sy), EX: String(ex), EY: String(ey), OPT: "0", SearchType: "2" },
     apiKey
@@ -65,12 +94,9 @@ export async function odsaySearchRoutes(
   return r.path ?? [];
 }
 
-// ─── Convert ODsay paths to ClientRoutes ──────────────────────────────────────
+// ─── Convert ODsay paths → ClientRoute[] ─────────────────────────────────────
 
-export function odsayPathsToClientRoutes(
-  paths: OdsayPath[],
-  arrivals: RealtimeMultiResponse["arrivals"]
-): ClientRoute[] {
+export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeArrivals): ClientRoute[] {
   const routes = paths.map((path) => {
     const segments: ClientSubPath[] = [];
     let adjustedTotal = 0;
@@ -97,25 +123,18 @@ export function odsayPathsToClientRoutes(
           })),
         });
         adjustedTotal += sp.sectionTime;
-
       } else if (sp.trafficType === 3) {
         const nextSubway = path.subPath.slice(i + 1).find((s) => s.trafficType === 1);
         const boardingStation = nextSubway?.startStation?.stationName ?? "";
         const walkMin = sp.sectionTime;
-
         let realtimeWait: number | null = null;
         let realtimeMsg: string | undefined;
 
         if (nextSubway && boardingStation) {
           const code = nextSubway.lane?.[0]?.subwayCode ?? 0;
           const targetId = `1${String(code).padStart(3, "0")}`;
-          const stationArrivals = arrivals[boardingStation] ?? [];
-          const match = stationArrivals.find((a) => a.subwayId === targetId);
-          if (match) {
-            realtimeWait = match.waitMinutes;
-            realtimeMsg = match.msg;
-            isRealtimeEnhanced = true;
-          }
+          const match = (arrivals[boardingStation] ?? []).find((a) => a.subwayId === targetId);
+          if (match) { realtimeWait = match.waitMinutes; realtimeMsg = match.msg; isRealtimeEnhanced = true; }
         }
 
         segments.push({
@@ -130,27 +149,17 @@ export function odsayPathsToClientRoutes(
       }
     }
 
-    return {
-      totalMinutes: path.info.totalTime,
-      adjustedTotalMinutes: Math.round(adjustedTotal),
-      transferCount: path.info.transferCount,
-      stationCount: path.info.totalStationCount,
-      cost: path.info.payment,
-      segments,
-      isRealtimeEnhanced,
-    } satisfies Omit<ClientRoute, "label">;
+    return { totalMinutes: path.info.totalTime, adjustedTotalMinutes: Math.round(adjustedTotal), transferCount: path.info.transferCount, stationCount: path.info.totalStationCount, cost: path.info.payment, segments, isRealtimeEnhanced } satisfies Omit<ClientRoute, "label">;
   });
 
-  // Sort + label
   routes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes);
   const labeled = routes as ClientRoute[];
   if (labeled.length > 0) labeled[0].label = "최단시간";
   const minT = Math.min(...labeled.map((r) => r.transferCount));
-  const leastTransfer = labeled.find((r) => r.transferCount === minT && !r.label);
-  if (leastTransfer) leastTransfer.label = "최소환승";
+  const lt = labeled.find((r) => r.transferCount === minT && !r.label);
+  if (lt) lt.label = "최소환승";
   const minC = Math.min(...labeled.map((r) => r.cost));
-  const cheapest = labeled.find((r) => r.cost === minC && !r.label);
-  if (cheapest) cheapest.label = "최소비용";
-
+  const lc = labeled.find((r) => r.cost === minC && !r.label);
+  if (lc) lc.label = "최소비용";
   return labeled;
 }

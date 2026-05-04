@@ -4,9 +4,7 @@ import { useState, useCallback } from "react";
 import SearchForm from "@/components/SearchForm";
 import RouteCard from "@/components/RouteCard";
 import RouteDetail from "@/components/RouteDetail";
-import { ClientRoute } from "@/app/api/find-route/route";
-import { odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes } from "@/lib/odsay-client";
-import { RealtimeMultiResponse } from "@/app/api/realtime-multi/route";
+import { ClientRoute, odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes, RealtimeArrivals } from "@/lib/odsay-client";
 
 export default function HomePage() {
   const [routes, setRoutes] = useState<ClientRoute[]>([]);
@@ -62,10 +60,10 @@ export default function HomePage() {
         }
       }
 
-      let arrivals: RealtimeMultiResponse["arrivals"] = {};
+      let arrivals: RealtimeArrivals = {};
       if (boardingStations.size > 0) {
         const rtRes = await fetch(`/api/realtime-multi?stations=${Array.from(boardingStations).join(",")}`);
-        if (rtRes.ok) ({ arrivals } = await rtRes.json() as RealtimeMultiResponse);
+        if (rtRes.ok) ({ arrivals } = await rtRes.json() as { arrivals: RealtimeArrivals });
       }
 
       // 4. 변환 + 표시

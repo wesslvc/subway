@@ -1,6 +1,6 @@
 "use client";
 
-import { ClientRoute, ClientSubPath } from "@/app/api/find-route/route";
+import { ClientRoute, ClientSubPath } from "@/lib/odsay-client";
 import { formatMinutes, formatKRW } from "@/lib/utils";
 
 interface RouteCardProps {
