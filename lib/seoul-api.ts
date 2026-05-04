@@ -44,10 +44,15 @@ export async function getRealtimeArrivals(
     throw new Error(`JSON-PARSE-ERR: ${text.slice(0, 120)}`);
   }
 
+  // INFO-2xx 계열 = 데이터 없음 (정상적 빈 응답) → 빈 배열 반환
+  const isNoData = (code: unknown) =>
+    typeof code === "string" && code.startsWith("INFO-") && code !== "INFO-000";
+
   // 구조 A: { errorMessage, realtimeArrivalList }
   if (data.errorMessage !== undefined) {
     const em = data.errorMessage as Record<string, unknown>;
     if (em.status !== 200) {
+      if (isNoData(em.code)) return [];
       throw new Error(`${em.code ?? "ERR"}: ${em.message ?? "오류"}`);
     }
     return ensureArray(data.realtimeArrivalList as RealtimeArrivalItem[] | undefined);
@@ -58,6 +63,7 @@ export async function getRealtimeArrivals(
     const inner = data.realtimeStationArrival as Record<string, unknown>;
     const result = inner.RESULT as Record<string, unknown> | undefined;
     if (result?.code !== "INFO-000") {
+      if (isNoData(result?.code)) return [];
       throw new Error(`${result?.code ?? "ERR"}: ${result?.message ?? "오류"}`);
     }
     return ensureArray(inner.row as RealtimeArrivalItem[] | undefined);
@@ -65,10 +71,8 @@ export async function getRealtimeArrivals(
 
   // 구조 C: flat { code, message, status } at root (에러 응답)
   if (typeof data.code === "string") {
-    if (data.code !== "INFO-000") {
-      throw new Error(`${data.code}: ${(data.message as string) ?? "오류"}`);
-    }
-    return [];
+    if (data.code === "INFO-000" || isNoData(data.code)) return [];
+    throw new Error(`${data.code}: ${(data.message as string) ?? "오류"}`);
   }
 
   throw new Error(`STRUCT-ERR: ${text.slice(0, 200)}`);

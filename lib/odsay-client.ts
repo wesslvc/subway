@@ -235,15 +235,15 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           .sort((a, b) => a.barvlDt - b.barvlDt);
 
         if (lineTrains.length === 0) {
-          // 노선 열차 자체가 없음 = 운행 종료
-          departureError = "운행종료";
+          // 노선 열차 자체 없음: 다른 노선 데이터는 있는데 이 노선만 없으면 운행종료
+          departureError = depData.list.length > 0 ? "운행종료" : "데이터 없음";
         } else {
-          // 방향 일치 열차만 사용 (way 없으면 모든 방향 허용)
+          // 방향 일치 열차 우선, 단거리 열차 등 불일치 시 같은 노선 첫 열차로 fallback
           const dirTrains = depWay
             ? lineTrains.filter((a) => matchDirection(a.bstatnNm, depWay))
             : lineTrains;
 
-          const first = dirTrains[0];
+          const first = dirTrains[0] ?? lineTrains[0];
           if (first) {
             departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
             departureArrivalMsg = first.msg;
@@ -251,8 +251,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             departureDirection = first.trainLineNm?.split(" - ")[0] ?? undefined;
             isRealtimeEnhanced = true;
           } else {
-            // 반대 방향 열차만 있는 경우
-            departureError = "반대방향 열차만 있음";
+            departureError = "출발 열차 정보 없음";
           }
         }
       }
@@ -320,14 +319,15 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             .sort((a, b) => a.barvlDt - b.barvlDt);
 
           if (lineTrains.length === 0) {
-            realtimeError = "운행종료";
+            realtimeError = stData.list.length > 0 ? "운행종료" : "데이터 없음";
           } else {
-            // 방향 일치 + 내가 도착한 이후 열차 중 가장 빠른 것
+            // 방향 일치 열차 우선, 단거리 열차 등 불일치 시 같은 노선으로 fallback
             const dirTrains = transferWay
               ? lineTrains.filter((a) => matchDirection(a.bstatnNm, transferWay))
               : lineTrains;
 
-            const nextTrain = dirTrains
+            const candidatePool = dirTrains.length > 0 ? dirTrains : lineTrains;
+            const nextTrain = candidatePool
               .filter((a) => a.barvlDt >= arrivalAtTransferSec)
               .sort((a, b) => a.barvlDt - b.barvlDt)[0];
 
@@ -335,14 +335,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
               realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
               realtimeMsg = nextTrain.msg;
               isRealtimeEnhanced = true;
-            } else if (dirTrains.length > 0) {
-              // 방향 맞는 열차는 있지만 내 도착 시각 이후가 없음 → 범위 초과
-              realtimeError = "범위 초과";
-            } else if (transferWay) {
-              // 반대 방향 열차만 있음
-              realtimeError = "반대방향 열차만 있음";
             } else {
-              realtimeError = "해당 노선 정보 없음";
+              realtimeError = "범위 초과";
             }
           }
         }
