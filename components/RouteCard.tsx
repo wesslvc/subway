@@ -105,8 +105,8 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
           ))}
         </div>
 
-        {/* Real-time wait info if available */}
-        {route.segments.some((s) => s.trafficType === 3 && s.realtimeWaitMinutes != null) && (
+        {/* Transfer wait info — always shown for transfer segments */}
+        {route.segments.some((s) => s.trafficType === 3) && (
           <div
             style={{
               marginTop: 8,
@@ -118,19 +118,21 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
             }}
           >
             {route.segments
-              .filter((s) => s.trafficType === 3 && s.realtimeWaitMinutes != null)
+              .filter((s) => s.trafficType === 3)
               .map((s, i) => (
                 <div
                   key={i}
                   style={{
                     fontSize: "0.7rem",
-                    color: "#22C55E",
                     fontWeight: 600,
                     letterSpacing: "0.05em",
+                    color: s.realtimeArrivalMsg ? "#22C55E" : "#888",
                   }}
                 >
-                  {s.startName} 다음열차{" "}
-                  {s.realtimeArrivalMsg ?? `${s.realtimeWaitMinutes}분 후`}
+                  {s.endName}{" "}
+                  {s.realtimeArrivalMsg
+                    ? `다음열차 ${s.realtimeArrivalMsg}`
+                    : `대기 약 ${s.realtimeWaitMinutes ?? 3}분`}
                 </div>
               ))}
           </div>

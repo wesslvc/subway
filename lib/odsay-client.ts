@@ -84,17 +84,13 @@ async function odsayGet<T>(endpoint: string, params: Record<string, string>, api
   return data.result;
 }
 
-// 역명 검색 — "역" 접미사 제거 후 검색, 정확 매칭 우선
+// 역명 검색 — "역" 접미사 제거 후 정확 매칭만 반환
 export async function odsaySearchStation(name: string, apiKey: string): Promise<OdsayStation[]> {
   const q = name.endsWith("역") ? name.slice(0, -1) : name;
   const r = await odsayGet<{ station?: OdsayStation[] }>(
     "searchStation", { lang: "0", stationName: q, stationType: "1" }, apiKey
   );
-  const stations = r.station ?? [];
-  const exact = stations.filter((s) => s.stationName === q);
-  const starts = stations.filter((s) => s.stationName !== q && s.stationName.startsWith(q));
-  const rest = stations.filter((s) => !s.stationName.startsWith(q));
-  return [...exact, ...starts, ...rest];
+  return (r.station ?? []).filter((s) => s.stationName === q);
 }
 
 // 지하철 전용 경로 탐색 (pathType === 1 만)
@@ -200,8 +196,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           sectionTime: walkMin,
           startName: segments.at(-1)?.endName ?? "",
           endName: stationName,
-          realtimeWaitMinutes: realtimeWait,
-          realtimeArrivalMsg: realtimeMsg,
+          realtimeWaitMinutes: waitMin,       // 실시간이면 실시간값, 없으면 기본 3분
+          realtimeArrivalMsg: realtimeMsg,    // 실시간일 때만 존재 (없으면 undefined)
         });
       }
       // trafficType === 2 (버스) 완전 무시
