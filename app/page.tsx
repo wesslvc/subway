@@ -28,6 +28,11 @@ export default function HomePage() {
     setSelectedIndex(0);
 
     const apiKey = process.env.NEXT_PUBLIC_ODSAY_API_KEY ?? "";
+    if (!apiKey) {
+      setError("ODsay API 키가 없습니다. Vercel 환경변수 NEXT_PUBLIC_ODSAY_API_KEY를 확인하세요.");
+      setIsLoading(false);
+      return;
+    }
 
     try {
       // 1. 역 좌표 검색 (브라우저에서 직접 ODsay 호출 — 도메인 인증 통과)
