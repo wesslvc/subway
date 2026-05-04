@@ -54,8 +54,10 @@ export interface OdsayPath {
 // ─── API calls ────────────────────────────────────────────────────────────────
 
 async function call<T>(endpoint: string, params: Record<string, string>): Promise<T> {
-  const qs = new URLSearchParams({ ...params, apiKey: params.apiKey }).toString();
-  const url = `${ODSAY_BASE}/${endpoint}?${qs}`;
+  const { apiKey, ...rest } = params;
+  // apiKey must not be URLSearchParams-encoded — + would become %2B and auth fails
+  const qs = new URLSearchParams(rest).toString();
+  const url = `${ODSAY_BASE}/${endpoint}?${qs}&apiKey=${apiKey}`;
   const res = await fetch(url, { cache: "no-store" });
   const text = await res.text();
   let data: Record<string, unknown>;
