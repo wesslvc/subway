@@ -58,7 +58,13 @@ async function call<T>(endpoint: string, params: Record<string, string>): Promis
   // apiKey must not be URLSearchParams-encoded — + would become %2B and auth fails
   const qs = new URLSearchParams(rest).toString();
   const url = `${ODSAY_BASE}/${endpoint}?${qs}&apiKey=${apiKey}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      Referer: "https://subway-7grv.vercel.app",
+      Origin: "https://subway-7grv.vercel.app",
+    },
+  });
   const text = await res.text();
   let data: Record<string, unknown>;
   try { data = JSON.parse(text); } catch {
