@@ -40,7 +40,7 @@ interface OdsayPath {
 
 async function odsayFetch<T>(endpoint: string, params: Record<string, string>, apiKey: string): Promise<T> {
   const qs = new URLSearchParams(params).toString();
-  const url = `${ODSAY_BASE}/${endpoint}?${qs}&apiKey=${apiKey}`;
+  const url = `${ODSAY_BASE}/${endpoint}?${qs}&apiKey=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url);
   const data = await res.json() as { result?: T; error?: unknown };
   if (data.error) throw new Error(`ODsay: ${JSON.stringify(data.error)}`);
