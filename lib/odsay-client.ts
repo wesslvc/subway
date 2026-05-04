@@ -100,10 +100,19 @@ async function odsayGet<T>(endpoint: string, params: Record<string, string>, api
 }
 
 export async function odsaySearchStation(name: string, apiKey: string): Promise<OdsayStation[]> {
+  // ODsay 역명 DB에는 "역" 접미사 없음. "잠실역" → "잠실" 로 검색
+  const searchName = name.endsWith("역") ? name.slice(0, -1) : name;
   const r = await odsayGet<{ station?: OdsayStation[] }>(
-    "searchStation", { lang: "0", stationName: name, stationType: "1" }, apiKey
+    "searchStation", { lang: "0", stationName: searchName, stationType: "1" }, apiKey
   );
-  return r.station ?? [];
+  const stations = r.station ?? [];
+  if (stations.length === 0) return [];
+
+  // 정확히 일치하는 역 우선, 그 다음 시작하는 역, 그 다음 나머지
+  const exact = stations.filter((s) => s.stationName === searchName);
+  const starts = stations.filter((s) => s.stationName.startsWith(searchName) && s.stationName !== searchName);
+  const rest = stations.filter((s) => !s.stationName.startsWith(searchName));
+  return [...exact, ...starts, ...rest];
 }
 
 export async function odsaySearchRoutes(
@@ -114,8 +123,8 @@ export async function odsaySearchRoutes(
     { SX: String(sx), SY: String(sy), EX: String(ex), EY: String(ey), OPT: "0", SearchType: "0" },
     apiKey
   );
-  // 지하철 포함 경로만 필터 (pathType 1=지하철전용, 3=복합)
-  const paths = (r.path ?? []).filter((p) => p.pathType === 1 || p.pathType === 3);
+  // pathType 1 = 지하철 전용만 허용 (버스 완전 제외)
+  const paths = (r.path ?? []).filter((p) => p.pathType === 1);
   return paths.slice(0, 5);
 }
 
@@ -217,11 +226,16 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       }
     }
 
+    // API의 transferCount/totalStationCount 대신 실제 subPath에서 계산 (더 정확)
+    const subwaySegs = path.subPath.filter((s) => s.trafficType === 1);
+    const transferCount = Math.max(0, subwaySegs.length - 1);
+    const stationCount = subwaySegs.reduce((sum, s) => sum + (s.stationCount ?? 0), 0);
+
     return {
       totalMinutes: path.info.totalTime,
       adjustedTotalMinutes: Math.round(adjustedTotal),
-      transferCount: path.info.transferCount,
-      stationCount: path.info.totalStationCount,
+      transferCount,
+      stationCount,
       cost: path.info.payment,
       segments,
       isRealtimeEnhanced,
