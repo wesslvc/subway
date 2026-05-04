@@ -234,9 +234,13 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           .filter((a) => a.subwayId === depId && a.barvlDt >= 0)
           .sort((a, b) => a.barvlDt - b.barvlDt);
 
+        // 해당 노선 전체(방향 불문, 과거 포함) — 운행종료 감지용
+        const allDepLineTrains = depData.list.filter((a) => a.subwayId === depId);
+
         if (lineTrains.length === 0) {
-          // 노선 열차 자체 없음: 다른 노선 데이터는 있는데 이 노선만 없으면 운행종료
-          departureError = depData.list.length > 0 ? "운행종료" : "데이터 없음";
+          // 해당 노선 열차 자체가 있는데 모두 barvlDt < 0 (이미 지남) → 운행종료
+          // 해당 노선 열차가 아예 없음 → 단순 데이터 없음 (시간표 추정)
+          departureError = allDepLineTrains.length > 0 ? "운행종료" : "데이터 없음";
         } else {
           const dirTrains = depWay
             ? lineTrains.filter((a) => matchDirection(a.bstatnNm, depWay))
@@ -317,8 +321,12 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             .filter((a) => a.subwayId === subwayId && a.barvlDt >= 0)
             .sort((a, b) => a.barvlDt - b.barvlDt);
 
+          const allTransferLineTrains = stData.list.filter((a) => a.subwayId === subwayId);
+
           if (lineTrains.length === 0) {
-            realtimeError = stData.list.length > 0 ? "운행종료" : "데이터 없음";
+            // 이 노선 열차가 있는데 모두 이미 지남 → 운행종료
+            // 이 노선 열차 자체가 없음 → 범위 밖 or 데이터 없음 → 시간표 추정
+            realtimeError = allTransferLineTrains.length > 0 ? "운행종료" : "데이터 없음";
           } else {
             // 방향 일치 열차 우선, 단거리 열차 등 불일치 시 같은 노선으로 fallback
             const dirTrains = transferWay
