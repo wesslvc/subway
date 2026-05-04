@@ -1,41 +1,24 @@
 /**
  * 서울시 지하철 실시간 도착정보 API (swopenAPI.seoul.go.kr)
- * URL: /api/subway/{KEY}/json/realtimeStationArrival/{START}/{END}/{STATION_NAME}
+ * URL: /api/subway/{KEY}/json/realtimeStationArrival/{START}/{END}/{STATION}
  *
- * JSON 응답 구조:
- * {
- *   "realtimeStationArrival": {
- *     "RESULT": { "code": "INFO-000", "message": "정상 처리되었습니다.", "status": 200 },
- *     "row": [ { subwayId, barvlDt, arvlMsg2, ... } ]
- *   }
- * }
+ * JSON 응답은 두 가지 구조 중 하나:
+ *   구조 A: { errorMessage: { status, code, message }, realtimeArrivalList: [...] }
+ *   구조 B: { realtimeStationArrival: { RESULT: { code, message }, row: [...] } }
  */
 
 const REALTIME_BASE = "http://swopenAPI.seoul.go.kr/api/subway";
 
 export interface RealtimeArrivalItem {
-  subwayId: string;  // "1001"~"1009", "1063" 등
-  statnNm: string;   // 역명
+  subwayId: string;  // "1001"~"1009" 등
+  statnNm: string;
   barvlDt: string;   // 도착 잔여 시간 (초, 문자열)
-  arvlMsg2: string;  // 첫번째 도착 메시지 ("2분 후", "도착" 등)
-  arvlMsg3: string;  // 두번째 도착 메시지
-  arvlCd: string;    // 도착코드 (0:진입, 1:도착, 2:출발, ...)
-  updnLine: string;  // 상하행 ("상행"/"하행")
+  arvlMsg2: string;  // 첫번째 도착 메시지
+  arvlMsg3: string;
+  arvlCd: string;
+  updnLine: string;
   trainLineNm: string;
-  bstatnNm: string;  // 종착역명
-}
-
-interface SeoulApiResult {
-  code: string;
-  message: string;
-  status: number;
-}
-
-interface SeoulRealtimeResponse {
-  realtimeStationArrival: {
-    RESULT: SeoulApiResult;
-    row?: RealtimeArrivalItem | RealtimeArrivalItem[];
-  };
+  bstatnNm: string;
 }
 
 function ensureArray<T>(val: T | T[] | undefined | null): T[] {
@@ -43,10 +26,6 @@ function ensureArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val];
 }
 
-/**
- * 특정 역의 실시간 도착정보를 조회합니다.
- * 에러 시 에러코드를 포함한 메시지로 throw합니다.
- */
 export async function getRealtimeArrivals(
   stationName: string,
   apiKey: string,
@@ -55,14 +34,33 @@ export async function getRealtimeArrivals(
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP-${res.status}`);
 
-  const data: SeoulRealtimeResponse = await res.json();
-  const inner = data?.realtimeStationArrival;
-  if (!inner) throw new Error("PARSE-ERR: 응답 구조 이상");
-
-  const result = inner.RESULT;
-  if (result?.code !== "INFO-000") {
-    throw new Error(`${result?.code ?? "UNKNOWN"}: ${result?.message ?? "알 수 없는 오류"}`);
+  const text = await res.text();
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error(`JSON-PARSE-ERR: ${text.slice(0, 120)}`);
   }
 
-  return ensureArray(inner.row);
+  // 구조 A: { errorMessage, realtimeArrivalList }
+  if (data.errorMessage !== undefined) {
+    const em = data.errorMessage as Record<string, unknown>;
+    if (em.status !== 200) {
+      throw new Error(`${em.code ?? "ERR"}: ${em.message ?? "오류"}`);
+    }
+    return ensureArray(data.realtimeArrivalList as RealtimeArrivalItem[] | undefined);
+  }
+
+  // 구조 B: { realtimeStationArrival: { RESULT, row } }
+  if (data.realtimeStationArrival !== undefined) {
+    const inner = data.realtimeStationArrival as Record<string, unknown>;
+    const result = inner.RESULT as Record<string, unknown> | undefined;
+    if (result?.code !== "INFO-000") {
+      throw new Error(`${result?.code ?? "ERR"}: ${result?.message ?? "오류"}`);
+    }
+    return ensureArray(inner.row as RealtimeArrivalItem[] | undefined);
+  }
+
+  // 알 수 없는 구조 — 실제 응답 일부를 에러에 포함
+  throw new Error(`STRUCT-ERR: ${text.slice(0, 200)}`);
 }

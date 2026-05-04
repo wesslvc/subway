@@ -89,13 +89,15 @@ async function odsayGet<T>(endpoint: string, params: Record<string, string>, api
   return data.result;
 }
 
-// 역명 검색 — "역" 접미사 제거 후 정확 매칭만 반환
+// 역명 검색 — 사용자 입력의 "역" 접미사 제거 후 ODsay 검색
+// ODsay DB 표기가 "역" 포함/미포함 둘 다 있으므로 양쪽 모두 허용
 export async function odsaySearchStation(name: string, apiKey: string): Promise<OdsayStation[]> {
-  const q = name.endsWith("역") ? name.slice(0, -1) : name;
+  const q = name.endsWith("역") ? name.slice(0, -1) : name; // "서울역" → "서울"
   const r = await odsayGet<{ station?: OdsayStation[] }>(
     "searchStation", { lang: "0", stationName: q, stationType: "1" }, apiKey
   );
-  return (r.station ?? []).filter((s) => s.stationName === q);
+  // "서울" 또는 "서울역" 둘 다 매칭 허용 (ODsay DB 표기 차이 대응)
+  return (r.station ?? []).filter((s) => s.stationName === q || s.stationName === q + "역");
 }
 
 // 지하철 전용 경로 탐색 (pathType === 1 만)
