@@ -238,20 +238,19 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           // 노선 열차 자체 없음: 다른 노선 데이터는 있는데 이 노선만 없으면 운행종료
           departureError = depData.list.length > 0 ? "운행종료" : "데이터 없음";
         } else {
-          // 방향 일치 열차 우선, 단거리 열차 등 불일치 시 같은 노선 첫 열차로 fallback
           const dirTrains = depWay
             ? lineTrains.filter((a) => matchDirection(a.bstatnNm, depWay))
             : lineTrains;
 
-          const first = dirTrains[0] ?? lineTrains[0];
+          const first = dirTrains[0];
           if (first) {
             departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
             departureArrivalMsg = first.msg;
-            // "방화행 - 신금호방면" → "방화행"
             departureDirection = first.trainLineNm?.split(" - ")[0] ?? undefined;
             isRealtimeEnhanced = true;
           } else {
-            departureError = "출발 열차 정보 없음";
+            // 같은 노선에 열차는 있지만 원하는 방향 없음 → 시간표 추정
+            departureError = "해당 방향 대기 중";
           }
         }
       }
@@ -326,8 +325,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
               ? lineTrains.filter((a) => matchDirection(a.bstatnNm, transferWay))
               : lineTrains;
 
-            const candidatePool = dirTrains.length > 0 ? dirTrains : lineTrains;
-            const nextTrain = candidatePool
+            const nextTrain = dirTrains
               .filter((a) => a.barvlDt >= arrivalAtTransferSec)
               .sort((a, b) => a.barvlDt - b.barvlDt)[0];
 
@@ -335,8 +333,12 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
               realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
               realtimeMsg = nextTrain.msg;
               isRealtimeEnhanced = true;
-            } else {
+            } else if (dirTrains.length > 0) {
               realtimeError = "범위 초과";
+            } else if (transferWay) {
+              realtimeError = "해당 방향 대기 중";
+            } else {
+              realtimeError = "해당 노선 정보 없음";
             }
           }
         }
