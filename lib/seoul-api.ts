@@ -8,7 +8,7 @@
  *   Base: http://swopenapi.seoul.go.kr/api/subway/{KEY}/json/realtimeStationArrival/0/30/{station}
  */
 
-const ROUTE_API_BASE = "https://ws.bus.go.kr/api/rest/pathinfo";
+const ROUTE_API_BASE = "http://ws.bus.go.kr/api/rest/pathinfo";
 const REALTIME_API_BASE = "http://swopenapi.seoul.go.kr/api/subway";
 
 // ─── Types from the Seoul APIs ────────────────────────────────────────────────
