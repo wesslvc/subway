@@ -2,13 +2,13 @@
  * Seoul Transit API client
  *
  * API 1: 서울특별시 대중교통환승경로 조회 서비스
- *   Base: http://ws.bus.go.kr/api/rest/pathinfo/
+ *   Base: http://openapi.seoul.go.kr:8088/{KEY}/json/{SERVICE}/{start}/{end}/{params}/
  *
  * API 2: 서울 실시간 지하철 도착정보
- *   Base: http://swopenapi.seoul.go.kr/api/subway/
+ *   Base: http://swopenapi.seoul.go.kr/api/subway/{KEY}/json/realtimeStationArrival/0/30/{station}
  */
 
-const ROUTE_API_BASE = "http://ws.bus.go.kr/api/rest/pathinfo";
+const ROUTE_API_BASE = "http://openapi.seoul.go.kr:8088";
 const REALTIME_API_BASE = "http://swopenapi.seoul.go.kr/api/subway";
 
 // ─── Types from the Seoul APIs ────────────────────────────────────────────────
@@ -19,11 +19,6 @@ export interface LocationItem {
   x: string; // longitude
   y: string; // latitude
   stationClass: string; // "2" = subway
-}
-
-export interface LocationInfoResponse {
-  msgHeader: { headerCd: string; headerMsg: string };
-  msgBody: { itemList: LocationItem[] | LocationItem };
 }
 
 export interface SubPathLane {
@@ -66,29 +61,21 @@ export interface RouteItem {
   subPathList: SubPath[];
 }
 
-export interface PathInfoResponse {
-  msgHeader: { headerCd: string; headerMsg: string };
-  msgBody: { itemList: RouteItem[] | RouteItem | null };
-}
-
 // Real-time arrival types
 export interface RealtimeArrivalItem {
   subwayId: string; // line code e.g. "1002" = line 2
-  subwayNm: string; // line name
-  statnNm: string; // station name
-  trainLineNm: string; // train destination line
-  ordkey: string;
-  subwayList: string;
-  statnList: string;
+  subwayNm: string;
+  statnNm: string;
+  trainLineNm: string;
   btrainSttus: string; // "" | "급행" | "특급"
   barvlDt: string; // seconds until arrival
   btrainNo: string;
   bstatnId: string;
-  bstatnNm: string; // destination name
+  bstatnNm: string;
   recptnDt: string;
   arvlMsg2: string; // e.g. "2분30초후"
-  arvlMsg3: string; // intermediate station name
-  arvlCd: string; // "0"=진입, "1"=도착, "2"=출발, "3"=전역출발, "4"=전전역출발, "5"=운행중, "99"=도착예정
+  arvlMsg3: string;
+  arvlCd: string;
 }
 
 export interface RealtimeArrivalResponse {
@@ -111,21 +98,45 @@ function ensureArray<T>(val: T[] | T | null | undefined): T[] {
 }
 
 /**
+ * Parse the openapi.seoul.go.kr response envelope.
+ * Response shape: { "ServiceName": { "RESULT": { "CODE": "INFO-000" }, "row": [...] } }
+ */
+function parseSeoulResponse<T>(data: Record<string, unknown>, serviceName: string): T[] {
+  const svc = data[serviceName] as Record<string, unknown> | undefined;
+  if (!svc) {
+    // Try to detect error response
+    const keys = Object.keys(data);
+    const firstKey = keys[0];
+    if (firstKey) {
+      const inner = data[firstKey] as Record<string, unknown>;
+      const result = inner?.RESULT as Record<string, string> | undefined;
+      if (result?.CODE && result.CODE !== "INFO-000") {
+        throw new Error(`Seoul API error: ${result.CODE} - ${result.MESSAGE ?? ""}`);
+      }
+    }
+    throw new Error(`Unexpected response shape, keys: ${Object.keys(data).join(", ")}`);
+  }
+
+  const result = svc.RESULT as Record<string, string> | undefined;
+  if (result?.CODE && result.CODE !== "INFO-000") {
+    throw new Error(`Seoul API error: ${result.CODE} - ${result.MESSAGE ?? ""}`);
+  }
+
+  return ensureArray(svc.row as T[] | T | null | undefined);
+}
+
+/**
  * Search for a station / location by name.
- * Returns items with coordinates.
  */
 export async function searchLocation(
   name: string,
   routeApiKey: string
 ): Promise<LocationItem[]> {
-  const url = `${ROUTE_API_BASE}/getLocationInfoList?ServiceKey=${encodeURIComponent(routeApiKey)}&stSrch=${encodeURIComponent(name)}&resultType=json`;
-  const res = await fetch(url, { next: { revalidate: 0 } });
-  if (!res.ok) throw new Error(`Location search failed: ${res.status}`);
-  const data: LocationInfoResponse = await res.json();
-  if (data.msgHeader.headerCd !== "0") {
-    throw new Error(`API error: ${data.msgHeader.headerMsg}`);
-  }
-  return ensureArray(data.msgBody?.itemList);
+  const url = `${ROUTE_API_BASE}/${routeApiKey}/json/getLocationInfoList/1/10/${encodeURIComponent(name)}/`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Location search HTTP ${res.status}`);
+  const data = await res.json();
+  return parseSeoulResponse<LocationItem>(data, "getLocationInfoList");
 }
 
 /**
@@ -139,72 +150,81 @@ export async function getSubwayRoutes(
   count: number = 5,
   routeApiKey: string
 ): Promise<RouteItem[]> {
-  const params = new URLSearchParams({
-    ServiceKey: routeApiKey,
-    startX: String(startX),
-    startY: String(startY),
-    endX: String(endX),
-    endY: String(endY),
-    count: String(count),
-    SearchPathType: "0",
-    resultType: "json",
-  });
-  const url = `${ROUTE_API_BASE}/getPathInfoBySubwayList?${params}`;
-  const res = await fetch(url, { next: { revalidate: 0 } });
-  if (!res.ok) throw new Error(`Route search failed: ${res.status}`);
-  const data: PathInfoResponse = await res.json();
-  if (data.msgHeader.headerCd !== "0") {
-    throw new Error(`API error: ${data.msgHeader.headerMsg}`);
+  const url = `${ROUTE_API_BASE}/${routeApiKey}/json/getPathInfoBySubwayList/1/${count}/${startX}/${startY}/${endX}/${endY}/`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Route search HTTP ${res.status}`);
+  const data = await res.json();
+  const rows = parseSeoulResponse<Record<string, unknown>>(data, "getPathInfoBySubwayList");
+
+  // Normalize row format: the API may return subPaths as nested JSON string or array
+  return rows.map((row) => normalizeRouteRow(row));
+}
+
+function normalizeRouteRow(row: Record<string, unknown>): RouteItem {
+  let subPathList: SubPath[] = [];
+
+  // The API may provide subPath as a JSON string, an array, or subPathList directly
+  if (Array.isArray(row.subPathList)) {
+    subPathList = row.subPathList as SubPath[];
+  } else if (Array.isArray(row.subPath)) {
+    subPathList = row.subPath as SubPath[];
+  } else if (typeof row.subPath === "string") {
+    try { subPathList = JSON.parse(row.subPath) as SubPath[]; } catch { /* ignore */ }
+  } else if (typeof row.subPathList === "string") {
+    try { subPathList = JSON.parse(row.subPathList) as SubPath[]; } catch { /* ignore */ }
   }
-  return ensureArray(data.msgBody?.itemList);
+
+  // Normalize lanes: may be nested differently
+  subPathList = subPathList.map((sp) => {
+    const spAny = sp as unknown as Record<string, unknown>;
+    let lane = sp.lane;
+    if (!lane && spAny.lanes) {
+      lane = ensureArray(spAny.lanes as SubPathLane[]);
+    }
+    let passStopList = sp.passStopList;
+    if (!passStopList && spAny.passStopListObj) {
+      passStopList = spAny.passStopListObj as { stations: SubPathStation[] };
+    }
+    return { ...sp, lane: lane ? ensureArray(lane) : undefined, passStopList };
+  });
+
+  return {
+    totalTime: Number(row.totalTime ?? 0),
+    totalTransitCount: Number(row.totalTransitCount ?? 0),
+    totalStationCount: Number(row.totalStationCount ?? 0),
+    payment: Number(row.payment ?? 0),
+    subPathList,
+  };
 }
 
 /**
  * Get real-time arrivals for a station.
- * stationName should be the Korean name e.g. "강동"
  */
 export async function getRealtimeArrivals(
   stationName: string,
   realtimeApiKey: string
 ): Promise<RealtimeArrivalItem[]> {
   const url = `${REALTIME_API_BASE}/${realtimeApiKey}/json/realtimeStationArrival/0/30/${encodeURIComponent(stationName)}`;
-  const res = await fetch(url, { next: { revalidate: 0 } });
-  if (!res.ok) throw new Error(`Realtime arrivals failed: ${res.status}`);
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Realtime arrivals HTTP ${res.status}`);
   const data: RealtimeArrivalResponse = await res.json();
-  if (data.errorMessage?.status !== 200) {
-    // Non-fatal: some stations may not have real-time data
-    return [];
-  }
+  if (data.errorMessage?.status !== 200) return [];
   return data.realtimeArrivalList ?? [];
 }
 
 /**
- * Given the real-time arrivals for a station and a target subway line code,
+ * Given real-time arrivals for a station and a target subway line code,
  * return the minimum wait in minutes for the next train on that line.
  */
 export function findMinWaitMinutes(
   arrivals: RealtimeArrivalItem[],
   subwayCode: number,
-  directionWayCode?: number
+  _directionWayCode?: number
 ): number | null {
-  // subwayId in the API is like "1001" for line 1, "1002" for line 2, etc.
-  // The route API uses subwayCode 1-9 and 101/104/109/110
-  // Mapping: 1→1001, 2→1002, 3→1003, 4→1004, 5→1005, 6→1006, 7→1007, 8→1008, 9→1009
-  //          101→1065(공항), 104→1077(경의중앙), 109→1075(수인분당), 110→1067(신분당)
   const lineCodeMap: Record<number, string> = {
-    1: "1001",
-    2: "1002",
-    3: "1003",
-    4: "1004",
-    5: "1005",
-    6: "1006",
-    7: "1007",
-    8: "1008",
-    9: "1009",
-    101: "1065",
-    104: "1077",
-    109: "1075",
-    110: "1067",
+    1: "1001", 2: "1002", 3: "1003", 4: "1004", 5: "1005",
+    6: "1006", 7: "1007", 8: "1008", 9: "1009",
+    101: "1065", 104: "1077", 109: "1075", 110: "1067",
   };
   const targetId = lineCodeMap[subwayCode];
   if (!targetId) return null;
@@ -212,7 +232,6 @@ export function findMinWaitMinutes(
   const matching = arrivals.filter((a) => a.subwayId === targetId);
   if (matching.length === 0) return null;
 
-  // barvlDt is seconds until arrival
   const seconds = matching
     .map((a) => parseInt(a.barvlDt, 10))
     .filter((s) => !isNaN(s) && s >= 0)

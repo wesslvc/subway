@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { STATIONS_BY_NAME } from "@/lib/subway-data";
-import { findRoutes } from "@/lib/pathfinder";
-import { getRealtimeArrivals, findMinWaitMinutes, RealtimeArrivalItem } from "@/lib/seoul-api";
-import { RealtimeArrival } from "@/types/subway";
+import {
+  searchLocation,
+  getSubwayRoutes,
+  getRealtimeArrivals,
+  findMinWaitMinutes,
+  RouteItem,
+  RealtimeArrivalItem,
+} from "@/lib/seoul-api";
 
 export const runtime = "nodejs";
 
+const ROUTE_API_KEY = process.env.SEOUL_ROUTE_API_KEY ?? "";
 const REALTIME_API_KEY = process.env.SEOUL_REALTIME_API_KEY ?? "";
 
 // ─── Response types exported for client use ───────────────────────────────────
@@ -17,13 +22,12 @@ export interface ClientSubPath {
   startName: string;
   endName: string;
   lineName?: string;
-  lineCode?: string;
+  lineCode?: number;
   lineColor?: string;
   direction?: string;
   stations?: { index: number; name: string; id: string }[];
   realtimeWaitMinutes?: number | null;
   realtimeArrivalMsg?: string;
-  walkSeconds?: number;
 }
 
 export interface ClientRoute {
@@ -46,16 +50,45 @@ export interface FindRouteResponse {
   error?: string;
 }
 
+// ─── Line color map ───────────────────────────────────────────────────────────
+
+const LINE_COLORS: Record<number, string> = {
+  1: "#0052A4", 2: "#00A84D", 3: "#EF7C1C", 4: "#00A4E3",
+  5: "#996CAC", 6: "#CD7C2F", 7: "#747F00", 8: "#E6186C", 9: "#BDB092",
+  101: "#76C624", // 공항철도
+  104: "#77C4A3", // 경의중앙선
+  109: "#FABE00", // 수인분당선
+  110: "#D4003B", // 신분당선
+};
+
+const LINE_NAMES: Record<number, string> = {
+  1: "1호선", 2: "2호선", 3: "3호선", 4: "4호선", 5: "5호선",
+  6: "6호선", 7: "7호선", 8: "8호선", 9: "9호선",
+  101: "공항철도", 104: "경의중앙선", 109: "수인분당선", 110: "신분당선",
+};
+
+// ─── Collect transfer station names across all routes ─────────────────────────
+
+function collectTransferStations(routes: RouteItem[]): string[] {
+  const names = new Set<string>();
+  for (const route of routes) {
+    for (const sp of route.subPathList) {
+      if (sp.trafficType === 3 && sp.endName) names.add(sp.endName);
+    }
+  }
+  return Array.from(names);
+}
+
 // ─── Fetch real-time arrivals for transfer stations ───────────────────────────
 
 async function fetchTransferArrivals(
-  transferStations: string[]
+  stationNames: string[]
 ): Promise<Map<string, RealtimeArrivalItem[]>> {
   const map = new Map<string, RealtimeArrivalItem[]>();
-  if (!REALTIME_API_KEY || transferStations.length === 0) return map;
+  if (!REALTIME_API_KEY || stationNames.length === 0) return map;
 
   await Promise.all(
-    transferStations.map(async (name) => {
+    stationNames.map(async (name) => {
       try {
         const arrivals = await getRealtimeArrivals(name, REALTIME_API_KEY);
         if (arrivals.length > 0) map.set(name, arrivals);
@@ -67,109 +100,85 @@ async function fetchTransferArrivals(
   return map;
 }
 
-// ─── Convert internal Route to ClientRoute ────────────────────────────────────
+// ─── Convert RouteItem subPath to ClientSubPath ───────────────────────────────
 
-function toClientRoute(
-  route: ReturnType<typeof findRoutes>[number],
+function toClientSubPaths(
+  route: RouteItem,
   arrivalMap: Map<string, RealtimeArrivalItem[]>
-): ClientRoute {
+): { segments: ClientSubPath[]; adjustedTotal: number; isRealtimeEnhanced: boolean } {
+  const segments: ClientSubPath[] = [];
   let adjustedTotal = 0;
   let isRealtimeEnhanced = false;
-  const segments: ClientSubPath[] = [];
 
-  // line code → subwayId mapping for real-time API
-  const lineCodeToSubwayId: Record<string, string> = {
-    "1": "1001", "2": "1002", "3": "1003", "4": "1004",
-    "5": "1005", "6": "1006", "7": "1007", "8": "1008", "9": "1009",
-  };
+  for (const sp of route.subPathList) {
+    if (sp.trafficType === 1) {
+      // Subway segment
+      const lane = sp.lane?.[0];
+      const subwayCode = lane?.subwayCode ?? 0;
+      const lineColor = LINE_COLORS[subwayCode] ?? "#888";
+      const lineName = LINE_NAMES[subwayCode] ?? lane?.name ?? `${subwayCode}호선`;
+      const stations = sp.passStopList?.stations?.map((s) => ({
+        index: s.index,
+        name: s.stationName,
+        id: s.stationID,
+      }));
 
-  for (const seg of route.segments) {
-    const segMinutes = Math.round(
-      (seg.stops.reduce((_, __, i) => {
-        if (i === 0) return 0;
-        return 0;
-      }, 0))
-    );
+      segments.push({
+        trafficType: 1,
+        sectionTime: sp.sectionTime,
+        stationCount: sp.stationCount,
+        startName: sp.startName,
+        endName: sp.endName,
+        lineName,
+        lineCode: subwayCode,
+        lineColor,
+        direction: sp.way,
+        stations,
+      });
+      adjustedTotal += sp.sectionTime;
+    } else if (sp.trafficType === 3) {
+      // Walk / transfer segment
+      // Check real-time arrival at the destination (next subway boarding point)
+      let realtimeWait: number | null = null;
+      let realtimeMsg: string | undefined;
 
-    // Calculate actual segment travel time from adjacent edges
-    const allStops = [seg.fromStation, ...seg.stops, seg.toStation];
-    let travelTime = 0;
-    for (let i = 0; i < allStops.length - 1; i++) {
-      const from = allStops[i];
-      const adj = from.adjacent.find((a) => a.stationId === allStops[i + 1].id);
-      if (adj) travelTime += adj.time;
-    }
-
-    // Check real-time wait at transfer point
-    let realtimeWait: number | null = null;
-    let realtimeMsg: string | undefined;
-
-    if (seg.waitMinutes !== undefined) {
-      // This is a transfer segment - check real-time
-      const arrivals = arrivalMap.get(seg.fromStation.name) ?? [];
-      if (arrivals.length > 0) {
-        const subwayId = lineCodeToSubwayId[seg.line];
-        if (subwayId) {
-          const matching = arrivals.filter((a) => a.subwayId === subwayId);
-          if (matching.length > 0) {
-            const secs = matching
-              .map((a) => parseInt(a.barvlDt, 10))
-              .filter((s) => !isNaN(s) && s >= 0)
-              .sort((a, b) => a - b);
-            if (secs.length > 0) {
-              realtimeWait = Math.ceil(secs[0] / 60);
-              realtimeMsg = matching[0].arvlMsg2;
+      // Find the next subway segment to know which line we're boarding
+      const spIdx = route.subPathList.indexOf(sp);
+      const nextSubway = route.subPathList.slice(spIdx + 1).find((s) => s.trafficType === 1);
+      if (nextSubway) {
+        const lane = nextSubway.lane?.[0];
+        const subwayCode = lane?.subwayCode ?? 0;
+        if (subwayCode > 0) {
+          const arrivals = arrivalMap.get(sp.endName) ?? arrivalMap.get(nextSubway.startName) ?? [];
+          if (arrivals.length > 0) {
+            const wait = findMinWaitMinutes(arrivals, subwayCode);
+            if (wait !== null) {
+              realtimeWait = wait;
+              const targetId = `1${String(subwayCode).padStart(3, "0")}`;
+              const match = arrivals.find((a) => a.subwayId === targetId);
+              realtimeMsg = match?.arvlMsg2;
               isRealtimeEnhanced = true;
             }
           }
         }
       }
-    }
 
-    const walkSec = seg.walkSeconds;
-    const walkMin = walkSec ? Math.ceil(walkSec / 60) : 0;
-    const effectiveWait = realtimeWait ?? seg.waitMinutes ?? 0;
+      const walkMin = sp.sectionTime;
+      const effectiveWait = realtimeWait ?? 3; // default 3 min wait if no realtime
 
-    // Add walk segment before subway segment if this is a transfer
-    if (walkMin > 0 || effectiveWait > 0) {
       segments.push({
         trafficType: 3,
         sectionTime: walkMin,
-        startName: seg.fromStation.name,
-        endName: seg.fromStation.name,
-        realtimeWaitMinutes: realtimeWait ?? seg.waitMinutes ?? null,
+        startName: sp.startName,
+        endName: sp.endName,
+        realtimeWaitMinutes: realtimeWait,
         realtimeArrivalMsg: realtimeMsg,
-        walkSeconds: walkSec,
       });
       adjustedTotal += walkMin + effectiveWait;
     }
-
-    // Subway segment
-    segments.push({
-      trafficType: 1,
-      sectionTime: travelTime,
-      stationCount: allStops.length - 1,
-      startName: seg.fromStation.name,
-      endName: seg.toStation.name,
-      lineName: `${seg.line}호선`,
-      lineCode: seg.line,
-      lineColor: seg.lineColor,
-      direction: seg.direction,
-      stations: allStops.map((s, i) => ({ index: i, name: s.name, id: s.id })),
-    });
-    adjustedTotal += travelTime;
   }
 
-  return {
-    totalMinutes: route.totalMinutes,
-    adjustedTotalMinutes: Math.round(adjustedTotal),
-    transferCount: route.transferCount,
-    stationCount: route.stationCount,
-    cost: route.cost,
-    segments,
-    label: route.label,
-    isRealtimeEnhanced,
-  };
+  return { segments, adjustedTotal, isRealtimeEnhanced };
 }
 
 // ─── GET handler ──────────────────────────────────────────────────────────────
@@ -186,54 +195,94 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Look up stations in local graph
-  const fromStations = STATIONS_BY_NAME.get(from) ?? [];
-  const toStations = STATIONS_BY_NAME.get(to) ?? [];
-
-  if (fromStations.length === 0) {
+  if (!ROUTE_API_KEY) {
     return NextResponse.json<FindRouteResponse>(
-      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: `'${from}' 역을 찾을 수 없습니다. 정확한 역명을 입력해주세요.` },
-      { status: 404 }
-    );
-  }
-  if (toStations.length === 0) {
-    return NextResponse.json<FindRouteResponse>(
-      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: `'${to}' 역을 찾을 수 없습니다. 정확한 역명을 입력해주세요.` },
-      { status: 404 }
+      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: "서버 설정 오류: API 키가 없습니다." },
+      { status: 500 }
     );
   }
 
-  // Find routes using local pathfinder
-  const routes = findRoutes({ from, to });
+  // Search coordinates for both stations
+  let fromLocations, toLocations;
+  try {
+    [fromLocations, toLocations] = await Promise.all([
+      searchLocation(from, ROUTE_API_KEY),
+      searchLocation(to, ROUTE_API_KEY),
+    ]);
+  } catch (e) {
+    return NextResponse.json<FindRouteResponse>(
+      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: `역 검색 실패: ${String(e)}` },
+      { status: 502 }
+    );
+  }
 
-  if (routes.length === 0) {
+  // Filter to subway stations (stationClass "2")
+  const fromSubway = fromLocations.filter((l) => l.stationClass === "2" || !l.stationClass);
+  const toSubway = toLocations.filter((l) => l.stationClass === "2" || !l.stationClass);
+
+  const fromStation = fromSubway[0] ?? fromLocations[0];
+  const toStation = toSubway[0] ?? toLocations[0];
+
+  if (!fromStation) {
+    return NextResponse.json<FindRouteResponse>(
+      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: `'${from}' 역을 찾을 수 없습니다.` },
+      { status: 404 }
+    );
+  }
+  if (!toStation) {
+    return NextResponse.json<FindRouteResponse>(
+      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: `'${to}' 역을 찾을 수 없습니다.` },
+      { status: 404 }
+    );
+  }
+
+  // Get routes from Seoul transit API
+  let rawRoutes: RouteItem[];
+  try {
+    rawRoutes = await getSubwayRoutes(
+      parseFloat(fromStation.x),
+      parseFloat(fromStation.y),
+      parseFloat(toStation.x),
+      parseFloat(toStation.y),
+      5,
+      ROUTE_API_KEY
+    );
+  } catch (e) {
+    return NextResponse.json<FindRouteResponse>(
+      { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: `경로 검색 실패: ${String(e)}` },
+      { status: 502 }
+    );
+  }
+
+  if (rawRoutes.length === 0) {
     return NextResponse.json<FindRouteResponse>(
       { routes: [], fromName: from, toName: to, searchTime: new Date().toISOString(), isRealtimeData: false, error: "경로를 찾을 수 없습니다." },
       { status: 404 }
     );
   }
 
-  // Collect transfer station names for real-time lookup
-  const transferNames = new Set<string>();
-  for (const route of routes) {
-    for (const seg of route.segments) {
-      if (seg.walkSeconds !== undefined && seg.walkSeconds > 0) {
-        transferNames.add(seg.fromStation.name);
-      }
-    }
-  }
-
-  // Fetch real-time arrivals in parallel
-  const arrivalMap = await fetchTransferArrivals(Array.from(transferNames));
+  // Collect transfer stations for real-time lookup
+  const transferStations = collectTransferStations(rawRoutes);
+  const arrivalMap = await fetchTransferArrivals(transferStations);
 
   // Convert to client routes
-  const clientRoutes = routes.map((r) => toClientRoute(r, arrivalMap));
+  const clientRoutes: ClientRoute[] = rawRoutes.map((r) => {
+    const { segments, adjustedTotal, isRealtimeEnhanced } = toClientSubPaths(r, arrivalMap);
+    return {
+      totalMinutes: r.totalTime,
+      adjustedTotalMinutes: Math.round(adjustedTotal),
+      transferCount: r.totalTransitCount,
+      stationCount: r.totalStationCount,
+      cost: r.payment,
+      segments,
+      isRealtimeEnhanced,
+    };
+  });
 
-  // Re-sort by adjusted time after real-time enhancement
+  // Sort by adjusted time
   clientRoutes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes);
 
-  // Re-label after sort
-  clientRoutes.forEach((r) => { r.label = undefined; });
+  // Label routes
   if (clientRoutes.length > 0) clientRoutes[0].label = "최단시간";
   const minTransfers = Math.min(...clientRoutes.map((r) => r.transferCount));
   const minTransferRoute = clientRoutes.find((r) => r.transferCount === minTransfers && !r.label);
@@ -244,9 +293,10 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json<FindRouteResponse>({
     routes: clientRoutes,
-    fromName: from,
-    toName: to,
+    fromName: fromStation.stationName || from,
+    toName: toStation.stationName || to,
     searchTime: new Date().toISOString(),
     isRealtimeData: clientRoutes.some((r) => r.isRealtimeEnhanced),
   });
 }
+
