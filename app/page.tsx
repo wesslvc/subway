@@ -4,7 +4,9 @@ import { useState, useCallback } from "react";
 import SearchForm from "@/components/SearchForm";
 import RouteCard from "@/components/RouteCard";
 import RouteDetail from "@/components/RouteDetail";
-import { ClientRoute, FindRouteResponse } from "@/app/api/find-route/route";
+import { ClientRoute } from "@/app/api/find-route/route";
+import { odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes } from "@/lib/odsay-client";
+import { RealtimeMultiResponse } from "@/app/api/realtime-multi/route";
 
 export default function HomePage() {
   const [routes, setRoutes] = useState<ClientRoute[]>([]);
@@ -25,25 +27,53 @@ export default function HomePage() {
     setMeta(null);
     setSelectedIndex(0);
 
-    try {
-      const params = new URLSearchParams({ from, to });
-      const res = await fetch(`/api/find-route?${params}`);
-      const data: FindRouteResponse = await res.json();
+    const apiKey = process.env.NEXT_PUBLIC_ODSAY_API_KEY ?? "";
 
-      if (!res.ok || data.error) {
-        setError(data.error ?? "알 수 없는 오류가 발생했습니다.");
-        return;
+    try {
+      // 1. 역 좌표 검색 (브라우저에서 직접 ODsay 호출 — 도메인 인증 통과)
+      const [fromStations, toStations] = await Promise.all([
+        odsaySearchStation(from, apiKey),
+        odsaySearchStation(to, apiKey),
+      ]);
+
+      if (fromStations.length === 0) { setError(`'${from}' 역을 찾을 수 없습니다.`); return; }
+      if (toStations.length === 0) { setError(`'${to}' 역을 찾을 수 없습니다.`); return; }
+
+      const fromSt = fromStations[0];
+      const toSt = toStations[0];
+
+      // 2. 경로 검색
+      const paths = await odsaySearchRoutes(fromSt.x, fromSt.y, toSt.x, toSt.y, apiKey);
+      if (paths.length === 0) { setError("경로를 찾을 수 없습니다."); return; }
+
+      // 3. 환승 역 실시간 데이터 (서버에서 처리)
+      const boardingStations = new Set<string>();
+      for (const path of paths) {
+        for (let i = 0; i < path.subPath.length; i++) {
+          if (path.subPath[i].trafficType === 3) {
+            const next = path.subPath.slice(i + 1).find((s) => s.trafficType === 1);
+            if (next?.startStation?.stationName) boardingStations.add(next.startStation.stationName);
+          }
+        }
       }
 
-      setRoutes(data.routes);
+      let arrivals: RealtimeMultiResponse["arrivals"] = {};
+      if (boardingStations.size > 0) {
+        const rtRes = await fetch(`/api/realtime-multi?stations=${Array.from(boardingStations).join(",")}`);
+        if (rtRes.ok) ({ arrivals } = await rtRes.json() as RealtimeMultiResponse);
+      }
+
+      // 4. 변환 + 표시
+      const clientRoutes = odsayPathsToClientRoutes(paths, arrivals);
+      setRoutes(clientRoutes);
       setMeta({
-        fromName: data.fromName || from,
-        toName: data.toName || to,
-        searchTime: data.searchTime ?? new Date().toISOString(),
-        isRealtimeData: data.isRealtimeData,
+        fromName: fromSt.stationName,
+        toName: toSt.stationName,
+        searchTime: new Date().toISOString(),
+        isRealtimeData: clientRoutes.some((r) => r.isRealtimeEnhanced),
       });
-    } catch {
-      setError("네트워크 오류가 발생했습니다. 다시 시도해주세요.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "오류가 발생했습니다. 다시 시도해주세요.");
     } finally {
       setIsLoading(false);
     }
