@@ -8,7 +8,7 @@
  *   Base: http://swopenapi.seoul.go.kr/api/subway/{KEY}/json/realtimeStationArrival/0/30/{station}
  */
 
-const ROUTE_API_BASE = "http://openapi.seoul.go.kr:8088";
+const ROUTE_API_BASE = "https://ws.bus.go.kr/api/rest/pathinfo";
 const REALTIME_API_BASE = "http://swopenapi.seoul.go.kr/api/subway";
 
 // ─── Types from the Seoul APIs ────────────────────────────────────────────────
@@ -98,31 +98,17 @@ function ensureArray<T>(val: T[] | T | null | undefined): T[] {
 }
 
 /**
- * Parse the openapi.seoul.go.kr response envelope.
- * Response shape: { "ServiceName": { "RESULT": { "CODE": "INFO-000" }, "row": [...] } }
+ * Parse the ws.bus.go.kr response envelope.
+ * Response shape: { msgHeader: { headerCd, headerMsg }, msgBody: { itemList: [...] } }
  */
-function parseSeoulResponse<T>(data: Record<string, unknown>, serviceName: string): T[] {
-  const svc = data[serviceName] as Record<string, unknown> | undefined;
-  if (!svc) {
-    // Try to detect error response
-    const keys = Object.keys(data);
-    const firstKey = keys[0];
-    if (firstKey) {
-      const inner = data[firstKey] as Record<string, unknown>;
-      const result = inner?.RESULT as Record<string, string> | undefined;
-      if (result?.CODE && result.CODE !== "INFO-000") {
-        throw new Error(`Seoul API error: ${result.CODE} - ${result.MESSAGE ?? ""}`);
-      }
-    }
-    throw new Error(`Unexpected response shape, keys: ${Object.keys(data).join(", ")}`);
+function parseBusApiResponse<T>(data: Record<string, unknown>, listKey: string): T[] {
+  const header = data.msgHeader as Record<string, string> | undefined;
+  if (header && header.headerCd !== "0") {
+    throw new Error(`Bus API error ${header.headerCd}: ${header.headerMsg}`);
   }
-
-  const result = svc.RESULT as Record<string, string> | undefined;
-  if (result?.CODE && result.CODE !== "INFO-000") {
-    throw new Error(`Seoul API error: ${result.CODE} - ${result.MESSAGE ?? ""}`);
-  }
-
-  return ensureArray(svc.row as T[] | T | null | undefined);
+  const body = data.msgBody as Record<string, unknown> | undefined;
+  if (!body) throw new Error(`No msgBody in response: ${JSON.stringify(data).slice(0, 200)}`);
+  return ensureArray(body[listKey] as T[] | T | null | undefined);
 }
 
 /**
@@ -132,15 +118,16 @@ export async function searchLocation(
   name: string,
   routeApiKey: string
 ): Promise<LocationItem[]> {
-  const url = `${ROUTE_API_BASE}/${routeApiKey}/json/getLocationInfoList/1/10/${encodeURIComponent(name)}/`;
+  const url = `${ROUTE_API_BASE}/getLocationInfoList?ServiceKey=${encodeURIComponent(routeApiKey)}&stSrch=${encodeURIComponent(name)}&resultType=json`;
   const res = await fetch(url, { cache: "no-store" });
   const text = await res.text();
-  if (!res.ok) throw new Error(`Location search HTTP ${res.status}: ${text.slice(0, 200)}`);
+  if (!res.ok) throw new Error(`Location search HTTP ${res.status}: ${text.slice(0, 300)}`);
   let data: Record<string, unknown>;
   try { data = JSON.parse(text); } catch {
-    throw new Error(`Location search returned non-JSON: ${text.slice(0, 200)}`);
+    throw new Error(`Location search non-JSON (${res.status}): ${text.slice(0, 300)}`);
   }
-  return parseSeoulResponse<LocationItem>(data, "getLocationInfoList");
+  // ws.bus.go.kr uses msgHeader/msgBody format
+  return parseBusApiResponse<LocationItem>(data, "itemList");
 }
 
 /**
@@ -154,15 +141,25 @@ export async function getSubwayRoutes(
   count: number = 5,
   routeApiKey: string
 ): Promise<RouteItem[]> {
-  const url = `${ROUTE_API_BASE}/${routeApiKey}/json/getPathInfoBySubwayList/1/${count}/${startX}/${startY}/${endX}/${endY}/`;
+  const params = new URLSearchParams({
+    ServiceKey: routeApiKey,
+    startX: String(startX),
+    startY: String(startY),
+    endX: String(endX),
+    endY: String(endY),
+    count: String(count),
+    SearchPathType: "0",
+    resultType: "json",
+  });
+  const url = `${ROUTE_API_BASE}/getPathInfoBySubwayList?${params}`;
   const res = await fetch(url, { cache: "no-store" });
   const text = await res.text();
-  if (!res.ok) throw new Error(`Route search HTTP ${res.status}: ${text.slice(0, 200)}`);
+  if (!res.ok) throw new Error(`Route search HTTP ${res.status}: ${text.slice(0, 300)}`);
   let data: Record<string, unknown>;
   try { data = JSON.parse(text); } catch {
-    throw new Error(`Route search returned non-JSON: ${text.slice(0, 200)}`);
+    throw new Error(`Route search non-JSON (${res.status}): ${text.slice(0, 300)}`);
   }
-  const rows = parseSeoulResponse<Record<string, unknown>>(data, "getPathInfoBySubwayList");
+  const rows = parseBusApiResponse<Record<string, unknown>>(data, "itemList");
 
   // Normalize row format: the API may return subPaths as nested JSON string or array
   return rows.map((row) => normalizeRouteRow(row));
