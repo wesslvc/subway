@@ -58,11 +58,13 @@ async function call<T>(endpoint: string, params: Record<string, string>): Promis
   const url = `${ODSAY_BASE}/${endpoint}?${qs}`;
   const res = await fetch(url, { cache: "no-store" });
   const text = await res.text();
-  let data: { result?: T; error?: { code: number; message: string } };
+  let data: Record<string, unknown>;
   try { data = JSON.parse(text); } catch {
-    throw new Error(`ODsay non-JSON (${res.status}): ${text.slice(0, 200)}`);
+    throw new Error(`ODsay non-JSON (${res.status}): ${text.slice(0, 300)}`);
   }
-  if (data.error) throw new Error(`ODsay ${data.error.code}: ${data.error.message}`);
+  if (data.error) {
+    throw new Error(`ODsay error: ${JSON.stringify(data.error)}`);
+  }
   return data.result as T;
 }
 
