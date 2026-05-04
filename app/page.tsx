@@ -45,9 +45,9 @@ export default function HomePage() {
       const fromSt = fromStations[0];
       const toSt = toStations[0];
 
-      // 2. 경로 검색
-      const paths = await odsaySearchRoutes(fromSt.x, fromSt.y, toSt.x, toSt.y, apiKey);
-      if (paths.length === 0) { setError("경로를 찾을 수 없습니다."); return; }
+      // 2. 경로 검색 — 출발/도착역명을 직접 검증해 ODsay가 인접역으로 대체한 경로 제외
+      const paths = await odsaySearchRoutes(fromSt.x, fromSt.y, toSt.x, toSt.y, apiKey, fromSt.stationName, toSt.stationName);
+      if (paths.length === 0) { setError(`'${fromSt.stationName}'역에서 '${toSt.stationName}'역으로 가는 지하철 경로가 없습니다.`); return; }
 
       // 3. 환승 역 실시간 대기시간 (서버에서 처리)
       const transferPoints = collectTransferPoints(paths);

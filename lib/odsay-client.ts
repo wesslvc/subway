@@ -99,13 +99,33 @@ export async function odsaySearchStation(name: string, apiKey: string): Promise<
 }
 
 // 지하철 전용 경로 탐색 (pathType === 1 만)
-export async function odsaySearchRoutes(sx: number, sy: number, ex: number, ey: number, apiKey: string): Promise<OdsayPath[]> {
+// fromName / toName 을 넘기면 실제 출발/도착 지하철역이 정확히 일치하는 경로만 반환
+export async function odsaySearchRoutes(
+  sx: number, sy: number, ex: number, ey: number,
+  apiKey: string,
+  fromName?: string,
+  toName?: string,
+): Promise<OdsayPath[]> {
   const r = await odsayGet<{ path?: OdsayPath[] }>(
     "searchPubTransPathT",
     { SX: String(sx), SY: String(sy), EX: String(ex), EY: String(ey), OPT: "0", SearchType: "0" },
     apiKey
   );
-  return (r.path ?? []).filter((p) => p.pathType === 1).slice(0, 5);
+  let paths = (r.path ?? []).filter((p) => p.pathType === 1);
+
+  if (fromName || toName) {
+    paths = paths.filter((p) => {
+      const subways = p.subPath.filter((s) => s.trafficType === 1);
+      if (subways.length === 0) return false;
+      const first = subways[0].startStation?.stationName ?? subways[0].startName ?? "";
+      const last = subways[subways.length - 1].endStation?.stationName ?? subways[subways.length - 1].endName ?? "";
+      if (fromName && first !== fromName) return false;
+      if (toName && last !== toName) return false;
+      return true;
+    });
+  }
+
+  return paths.slice(0, 5);
 }
 
 // ─── 환승역 수집 ──────────────────────────────────────────────────────────────
