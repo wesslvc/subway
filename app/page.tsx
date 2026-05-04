@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import SearchForm from "@/components/SearchForm";
 import RouteCard from "@/components/RouteCard";
 import RouteDetail from "@/components/RouteDetail";
-import { ClientRoute, odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes, collectTransferPoints, RealtimeArrivals } from "@/lib/odsay-client";
+import { ClientRoute, odsaySearchStation, odsaySearchRoutes, odsayPathsToClientRoutes, collectTransferPoints, collectDepartureStations, RealtimeArrivals } from "@/lib/odsay-client";
 
 export default function HomePage() {
   const [routes, setRoutes] = useState<ClientRoute[]>([]);
@@ -49,12 +49,16 @@ export default function HomePage() {
       const paths = await odsaySearchRoutes(fromSt.x, fromSt.y, toSt.x, toSt.y, apiKey, fromSt.stationName, toSt.stationName);
       if (paths.length === 0) { setError(`'${fromSt.stationName}'역에서 '${toSt.stationName}'역으로 가는 지하철 경로가 없습니다.`); return; }
 
-      // 3. 환승 역 실시간 대기시간 (서버에서 처리)
+      // 3. 실시간 도착정보 수집 — 출발역 + 환승역 모두
       const transferPoints = collectTransferPoints(paths);
+      const depStations = collectDepartureStations(paths);
+      const allStations = [...new Set([
+        ...depStations,
+        ...transferPoints.map((p) => p.stationName),
+      ])];
       let arrivals: RealtimeArrivals = {};
-      if (transferPoints.length > 0) {
-        const uniqueNames = [...new Set(transferPoints.map((p) => p.stationName))];
-        const encoded = uniqueNames.map((n) => encodeURIComponent(n)).join(",");
+      if (allStations.length > 0) {
+        const encoded = allStations.map((n) => encodeURIComponent(n)).join(",");
         const rtRes = await fetch(`/api/realtime-multi?stations=${encoded}`);
         if (rtRes.ok) ({ arrivals } = await rtRes.json() as { arrivals: RealtimeArrivals });
       }

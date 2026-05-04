@@ -5,7 +5,13 @@ export const runtime = "nodejs";
 
 const REALTIME_KEY = process.env.SEOUL_REALTIME_API_KEY ?? "";
 
-type ArrivalEntry = { subwayId: string; barvlDt: number; msg: string };
+type ArrivalEntry = {
+  subwayId: string;
+  barvlDt: number;
+  msg: string;
+  bstatnNm: string;    // 종착역명 (방향 매칭용)
+  trainLineNm: string; // "방화행 - 신금호방면" (행선지 표시용)
+};
 type StationResult = { list: ArrivalEntry[]; error?: string };
 
 export interface RealtimeMultiResponse {
@@ -25,13 +31,14 @@ export async function GET(req: NextRequest) {
     stations.map(async (name) => {
       try {
         const list = await getRealtimeArrivals(name, REALTIME_KEY);
-        // 중복 제거 없이 모든 열차 반환 — 누적 시간 기반 탐색에 필요
         arrivals[name] = {
           list: list
             .map((a) => ({
               subwayId: a.subwayId,
               barvlDt: parseInt(a.barvlDt, 10),
               msg: a.arvlMsg2,
+              bstatnNm: a.bstatnNm,
+              trainLineNm: a.trainLineNm,
             }))
             .filter((a) => !isNaN(a.barvlDt) && a.barvlDt >= 0),
         };

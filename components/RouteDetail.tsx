@@ -120,6 +120,37 @@ export default function RouteDetail({ route, fromName, toName }: RouteDetailProp
 
       {/* Timeline */}
       <div style={{ padding: "20px" }}>
+        {/* 출발역 대기 */}
+        {route.departureError ? (
+          <div style={{ marginBottom: 12, fontSize: "0.75rem", fontWeight: 600, color: "#EF4444" }}>
+            출발 실시간 수집 오류 ({route.departureError})
+          </div>
+        ) : route.departureWaitMinutes != null ? (
+          <div style={{
+            marginBottom: 12, padding: "8px 10px",
+            border: "1px solid #22C55E22", backgroundColor: "#052e16",
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%", backgroundColor: "#22C55E",
+              display: "inline-block", animation: "blink 1.8s ease-in-out infinite", flexShrink: 0,
+            }} />
+            <div style={{ fontSize: "0.8rem", color: "#22C55E", fontWeight: 700 }}>
+              {route.departureWaitMinutes === 0 ? "지금 바로 탑승 가능" : `${route.departureWaitMinutes}분 후 탑승`}
+              {route.departureDirection && (
+                <span style={{ marginLeft: 8, fontWeight: 900, color: "#4ADE80" }}>
+                  {route.departureDirection}
+                </span>
+              )}
+              {route.departureArrivalMsg && (
+                <span style={{ marginLeft: 8, color: "#16A34A", fontWeight: 500 }}>
+                  ({route.departureArrivalMsg})
+                </span>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         {route.segments.map((seg, i) => {
           if (seg.trafficType === 1) {
             return <SubwaySegment key={i} seg={seg} isLast={i === route.segments.length - 1} />;

@@ -30,7 +30,9 @@ export async function getRealtimeArrivals(
   stationName: string,
   apiKey: string,
 ): Promise<RealtimeArrivalItem[]> {
-  const url = `${REALTIME_BASE}/${apiKey}/json/realtimeStationArrival/0/30/${encodeURIComponent(stationName)}`;
+  // "역" 제거 후 API 호출 (Seoul API DB는 "역" 없는 표기 사용)
+  const apiName = stationName.endsWith("역") ? stationName.slice(0, -1) : stationName;
+  const url = `${REALTIME_BASE}/${apiKey}/json/realtimeStationArrival/0/60/${encodeURIComponent(apiName)}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP-${res.status}`);
 
