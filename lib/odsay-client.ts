@@ -1,7 +1,6 @@
 "use client";
 
 const ODSAY_BASE = "https://api.odsay.com/v1/api";
-const REALTIME_DELAY_SEC = 120; // Seoul API 지연 2분
 
 const LINE_COLORS: Record<number, string> = {
   1: "#0052A4", 2: "#00A84D", 3: "#EF7C1C", 4: "#00A4E3",
@@ -246,7 +245,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
 
           const first = dirTrains[0];
           if (first) {
-            departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt - REALTIME_DELAY_SEC) / 60);
+            departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
             departureArrivalMsg = first.msg;
             // "방화행 - 신금호방면" → "방화행"
             departureDirection = first.trainLineNm?.split(" - ")[0] ?? undefined;
@@ -329,11 +328,11 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
               : lineTrains;
 
             const nextTrain = dirTrains
-              .filter((a) => a.barvlDt >= arrivalAtTransferSec + REALTIME_DELAY_SEC)
+              .filter((a) => a.barvlDt >= arrivalAtTransferSec)
               .sort((a, b) => a.barvlDt - b.barvlDt)[0];
 
             if (nextTrain) {
-              realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - REALTIME_DELAY_SEC - arrivalAtTransferSec) / 60));
+              realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
               realtimeMsg = nextTrain.msg;
               isRealtimeEnhanced = true;
             } else if (dirTrains.length > 0) {
