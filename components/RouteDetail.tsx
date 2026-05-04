@@ -121,7 +121,18 @@ export default function RouteDetail({ route, fromName, toName }: RouteDetailProp
       {/* Timeline */}
       <div style={{ padding: "20px" }}>
         {/* 출발역 대기 */}
-        {route.departureWaitMinutes != null ? (
+        {route.departureError === "운행종료" ? (
+          <div style={{
+            marginBottom: 12, padding: "8px 10px",
+            border: "1px solid #F59E0B44", backgroundColor: "#1c1300",
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{ fontSize: "1rem" }}>⚑</span>
+            <div style={{ fontSize: "0.8rem", color: "#F59E0B", fontWeight: 800, letterSpacing: "0.05em" }}>
+              운행종료 — 현재 이 노선은 운행하지 않습니다
+            </div>
+          </div>
+        ) : route.departureWaitMinutes != null ? (
           route.departureIsTimetable ? (
             <div style={{
               marginBottom: 12, padding: "8px 10px",
@@ -309,7 +320,11 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
         <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#666" }}>
           {seg.startName} 환승 · 도보 {seg.sectionTime}분
         </div>
-        {seg.realtimeIsTimetable ? (
+        {seg.realtimeError === "운행종료" ? (
+          <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "#F59E0B", marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}>
+            ⚑ 운행종료
+          </div>
+        ) : seg.realtimeIsTimetable ? (
           <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#666", marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: "#555", display: "inline-block" }} />
             시간표 기준 ~{seg.realtimeWaitMinutes}분 대기

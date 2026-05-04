@@ -82,7 +82,11 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
         {/* Departure wait + transfer waits */}
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #1E1E1E", display: "flex", flexDirection: "column", gap: 4 }}>
           {/* 출발역 대기 */}
-          {route.departureWaitMinutes != null ? (
+          {route.departureError === "운행종료" ? (
+            <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#F59E0B", letterSpacing: "0.05em" }}>
+              ⚑ 운행종료
+            </div>
+          ) : route.departureWaitMinutes != null ? (
             <div style={{ fontSize: "0.68rem", fontWeight: 700, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               {route.departureIsTimetable ? (
                 <>
@@ -113,7 +117,9 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
           {route.segments.filter((s) => s.trafficType === 3).map((s, i) => (
             <div key={i} style={{ fontSize: "0.68rem", fontWeight: 600, display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ color: "#555" }}>{s.endName} 환승 ·</span>
-              {s.realtimeIsTimetable ? (
+              {s.realtimeError === "운행종료" ? (
+                <span style={{ color: "#F59E0B", fontWeight: 800 }}>⚑ 운행종료</span>
+              ) : s.realtimeIsTimetable ? (
                 <>
                   <span style={{ color: "#666" }}>시간표</span>
                   <span style={{ color: "#888" }}>~{s.realtimeWaitMinutes}분 대기</span>

@@ -230,29 +230,35 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       } else if (depData.error) {
         departureError = depData.error;
       } else {
-        // 방향 일치 열차 우선, 없으면 같은 노선 첫 열차
-        const sameDir = depData.list.filter(
-          (a) => a.subwayId === depId && matchDirection(a.bstatnNm, depWay) && a.barvlDt >= 0
-        ).sort((a, b) => a.barvlDt - b.barvlDt);
+        const lineTrains = depData.list
+          .filter((a) => a.subwayId === depId && a.barvlDt >= 0)
+          .sort((a, b) => a.barvlDt - b.barvlDt);
 
-        const fallback = depData.list.filter(
-          (a) => a.subwayId === depId && a.barvlDt >= 0
-        ).sort((a, b) => a.barvlDt - b.barvlDt);
-
-        const first = sameDir[0] ?? fallback[0];
-        if (first) {
-          departureWaitMinutes = Math.ceil(first.barvlDt / 60);
-          departureArrivalMsg = first.msg;
-          // "방화행 - 신금호방면" → "방화행"
-          departureDirection = first.trainLineNm?.split(" - ")[0] ?? undefined;
-          isRealtimeEnhanced = true;
+        if (lineTrains.length === 0) {
+          // 노선 열차 자체가 없음 = 운행 종료
+          departureError = "운행종료";
         } else {
-          departureError = "출발 열차 정보 없음";
+          // 방향 일치 열차만 사용 (way 없으면 모든 방향 허용)
+          const dirTrains = depWay
+            ? lineTrains.filter((a) => matchDirection(a.bstatnNm, depWay))
+            : lineTrains;
+
+          const first = dirTrains[0];
+          if (first) {
+            departureWaitMinutes = Math.ceil(first.barvlDt / 60);
+            departureArrivalMsg = first.msg;
+            // "방화행 - 신금호방면" → "방화행"
+            departureDirection = first.trainLineNm?.split(" - ")[0] ?? undefined;
+            isRealtimeEnhanced = true;
+          } else {
+            // 반대 방향 열차만 있는 경우
+            departureError = "반대방향 열차만 있음";
+          }
         }
       }
 
-      // 실시간 실패 시 시간표 기반 추정
-      if (departureWaitMinutes === null) {
+      // 운행종료가 아닐 때만 시간표 기반 추정
+      if (departureWaitMinutes === null && departureError !== "운행종료") {
         departureWaitMinutes = getHeadwayMin(depCode);
         departureIsTimetable = true;
       }
@@ -301,34 +307,53 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
 
         let realtimeIsTimetable = false;
 
+        const transferWay = nextSub.way;
+
         const stData = arrivals[stationName];
         if (!stData) {
           realtimeError = "데이터 없음";
         } else if (stData.error) {
           realtimeError = stData.error;
         } else {
-          const nextTrain = stData.list
-            .filter((a) => a.subwayId === subwayId && a.barvlDt >= arrivalAtTransferSec)
-            .sort((a, b) => a.barvlDt - b.barvlDt)[0];
+          const lineTrains = stData.list
+            .filter((a) => a.subwayId === subwayId && a.barvlDt >= 0)
+            .sort((a, b) => a.barvlDt - b.barvlDt);
 
-          if (nextTrain) {
-            realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
-            realtimeMsg = nextTrain.msg;
-            isRealtimeEnhanced = true;
-          } else if (stData.list.some((a) => a.subwayId === subwayId)) {
-            realtimeError = "범위 초과";
+          if (lineTrains.length === 0) {
+            realtimeError = "운행종료";
           } else {
-            realtimeError = "해당 노선 정보 없음";
+            // 방향 일치 + 내가 도착한 이후 열차 중 가장 빠른 것
+            const dirTrains = transferWay
+              ? lineTrains.filter((a) => matchDirection(a.bstatnNm, transferWay))
+              : lineTrains;
+
+            const nextTrain = dirTrains
+              .filter((a) => a.barvlDt >= arrivalAtTransferSec)
+              .sort((a, b) => a.barvlDt - b.barvlDt)[0];
+
+            if (nextTrain) {
+              realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
+              realtimeMsg = nextTrain.msg;
+              isRealtimeEnhanced = true;
+            } else if (dirTrains.length > 0) {
+              // 방향 맞는 열차는 있지만 내 도착 시각 이후가 없음 → 범위 초과
+              realtimeError = "범위 초과";
+            } else if (transferWay) {
+              // 반대 방향 열차만 있음
+              realtimeError = "반대방향 열차만 있음";
+            } else {
+              realtimeError = "해당 노선 정보 없음";
+            }
           }
         }
 
-        // 실시간 실패 시 시간표 기반 추정
-        if (realtimeWaitMin === null) {
+        // 운행종료가 아닐 때만 시간표 기반 추정
+        if (realtimeWaitMin === null && realtimeError !== "운행종료") {
           realtimeWaitMin = getHeadwayMin(lineCode);
           realtimeIsTimetable = true;
         }
 
-        cumulativeMin += walkMin + realtimeWaitMin;
+        cumulativeMin += walkMin + (realtimeWaitMin ?? 0);
 
         segments.push({
           trafficType: 3,
