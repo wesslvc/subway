@@ -2,17 +2,29 @@
 
 const ODSAY_BASE = "https://api.odsay.com/v1/api";
 
+// ODsay 지하철 노선 코드 → 색상 (공식 문서 기준)
 const LINE_COLORS: Record<number, string> = {
   1: "#0052A4", 2: "#00A84D", 3: "#EF7C1C", 4: "#00A4E3",
   5: "#996CAC", 6: "#CD7C2F", 7: "#747F00", 8: "#E6186C", 9: "#BDB092",
-  100: "#76C624", 104: "#77C4A3", 107: "#8CC63F", 108: "#0C8E72",
-  109: "#FABE00", 110: "#D4003B", 112: "#B0CE18", 113: "#8BCBC8",
+  100: "#7CA8D5", // 인천1호선
+  101: "#F5A200", // 인천2호선
+  102: "#0C8E72", // 경춘선
+  103: "#77C4A3", // 경의중앙선
+  104: "#76C624", // 공항철도
+  105: "#003DA5", // 경강선
+  106: "#FABE00", // 의정부경전철
+  107: "#76C624", // 에버라인
+  108: "#D4003B", // 신분당선
+  109: "#B0CE18", // 우이신설선
+  110: "#8BCBC8", // 서해선
+  111: "#AD8605", // 김포골드라인
+  112: "#FABE00", // 수인분당선
 };
 
-// ─── Types (no server imports) ────────────────────────────────────────────────
+// ─── 공유 타입 ─────────────────────────────────────────────────────────────────
 
 export interface ClientSubPath {
-  trafficType: number;
+  trafficType: number; // 1=지하철, 3=도보/환승
   sectionTime: number;
   stationCount?: number;
   startName: string;
@@ -39,6 +51,8 @@ export interface ClientRoute {
 
 export type RealtimeArrivals = Record<string, { subwayId: string; waitMinutes: number; msg: string }[]>;
 
+// ─── ODsay 내부 타입 ──────────────────────────────────────────────────────────
+
 interface OdsayStation {
   stationID: number;
   stationName: string;
@@ -47,10 +61,12 @@ interface OdsayStation {
 }
 
 interface OdsaySubPath {
-  trafficType: number;
+  trafficType: number; // 1=지하철, 2=버스, 3=도보
   sectionTime: number;
   stationCount?: number;
   lane?: { name: string; subwayCode: number }[];
+  startName?: string;
+  endName?: string;
   startStation?: { stationID: number; stationName: string; x: number; y: number };
   endStation?: { stationID: number; stationName: string; x: number; y: number };
   passStopList?: { stations: { index: number; stationID: number; stationName: string }[] };
@@ -58,12 +74,19 @@ interface OdsaySubPath {
 }
 
 interface OdsayPath {
-  pathType: number;
-  info: { totalTime: number; transferCount: number; totalStationCount: number; payment: number };
+  pathType: number; // 1=지하철, 2=버스, 3=복합
+  info: {
+    totalTime: number;
+    transferCount: number;
+    totalStationCount: number;
+    payment: number;
+    firstStartStation: string;
+    lastEndStation: string;
+  };
   subPath: OdsaySubPath[];
 }
 
-// ─── ODsay API (browser fetch — Origin header sent automatically) ─────────────
+// ─── ODsay API 호출 (브라우저 — Origin 헤더 자동 전송) ────────────────────────
 
 async function odsayGet<T>(endpoint: string, params: Record<string, string>, apiKey: string): Promise<T> {
   const qs = new URLSearchParams(params).toString();
@@ -72,7 +95,7 @@ async function odsayGet<T>(endpoint: string, params: Record<string, string>, api
   if (!res.ok) throw new Error(`ODsay HTTP ${res.status}`);
   const data = await res.json() as { result?: T; error?: unknown };
   if (data.error) throw new Error(`ODsay: ${JSON.stringify(data.error)}`);
-  if (!data.result) throw new Error("ODsay: 결과가 없습니다");
+  if (!data.result) throw new Error("ODsay: 응답 데이터가 없습니다");
   return data.result;
 }
 
@@ -88,13 +111,36 @@ export async function odsaySearchRoutes(
 ): Promise<OdsayPath[]> {
   const r = await odsayGet<{ path?: OdsayPath[] }>(
     "searchPubTransPathT",
-    { SX: String(sx), SY: String(sy), EX: String(ex), EY: String(ey), OPT: "0", SearchType: "2" },
+    { SX: String(sx), SY: String(sy), EX: String(ex), EY: String(ey), OPT: "0", SearchType: "0" },
     apiKey
   );
-  return r.path ?? [];
+  // 지하철 포함 경로만 필터 (pathType 1=지하철전용, 3=복합)
+  const paths = (r.path ?? []).filter((p) => p.pathType === 1 || p.pathType === 3);
+  return paths.slice(0, 5);
 }
 
-// ─── Convert ODsay paths → ClientRoute[] ─────────────────────────────────────
+// ─── 실시간 대기시간 조회 대상 역 수집 ───────────────────────────────────────
+
+export function collectTransferStations(paths: OdsayPath[]): string[] {
+  const stations = new Set<string>();
+  for (const path of paths) {
+    const subPaths = path.subPath;
+    for (let i = 0; i < subPaths.length; i++) {
+      const sp = subPaths[i];
+      if (sp.trafficType !== 3) continue;
+
+      // 앞뒤에 지하철 구간이 있는 경우만 진짜 환승 도보
+      const hasPrevSubway = subPaths.slice(0, i).some((s) => s.trafficType === 1);
+      const nextSubway = subPaths.slice(i + 1).find((s) => s.trafficType === 1);
+      if (hasPrevSubway && nextSubway?.startStation?.stationName) {
+        stations.add(nextSubway.startStation.stationName);
+      }
+    }
+  }
+  return Array.from(stations);
+}
+
+// ─── ODsay 경로 → ClientRoute 변환 ───────────────────────────────────────────
 
 export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeArrivals): ClientRoute[] {
   const routes = paths.map((path) => {
@@ -106,14 +152,15 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       const sp = path.subPath[i];
 
       if (sp.trafficType === 1) {
+        // ── 지하철 구간 ──────────────────────────────────────────
         const lane = sp.lane?.[0];
         const code = lane?.subwayCode ?? 0;
         segments.push({
           trafficType: 1,
           sectionTime: sp.sectionTime,
           stationCount: sp.stationCount,
-          startName: sp.startStation?.stationName ?? "",
-          endName: sp.endStation?.stationName ?? "",
+          startName: sp.startStation?.stationName ?? sp.startName ?? "",
+          endName: sp.endStation?.stationName ?? sp.endName ?? "",
           lineName: lane?.name,
           lineCode: code,
           lineColor: LINE_COLORS[code] ?? "#888",
@@ -123,33 +170,62 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           })),
         });
         adjustedTotal += sp.sectionTime;
+
       } else if (sp.trafficType === 3) {
+        // ── 도보 구간 ────────────────────────────────────────────
+        const hasPrevSubway = path.subPath.slice(0, i).some((s) => s.trafficType === 1);
         const nextSubway = path.subPath.slice(i + 1).find((s) => s.trafficType === 1);
-        const boardingStation = nextSubway?.startStation?.stationName ?? "";
-        const walkMin = sp.sectionTime;
+
+        // 앞뒤로 지하철 구간이 있는 경우만 실제 환승 (첫 도보·마지막 도보 제외)
+        const isTransfer = hasPrevSubway && nextSubway != null;
+
         let realtimeWait: number | null = null;
         let realtimeMsg: string | undefined;
 
-        if (nextSubway && boardingStation) {
+        if (isTransfer && nextSubway.startStation?.stationName) {
+          const boardingStation = nextSubway.startStation.stationName;
           const code = nextSubway.lane?.[0]?.subwayCode ?? 0;
+          // ODsay subwayCode → 실시간 API subwayId (1→"1001", 2→"1002", ...)
           const targetId = `1${String(code).padStart(3, "0")}`;
           const match = (arrivals[boardingStation] ?? []).find((a) => a.subwayId === targetId);
-          if (match) { realtimeWait = match.waitMinutes; realtimeMsg = match.msg; isRealtimeEnhanced = true; }
+          if (match) {
+            realtimeWait = match.waitMinutes;
+            realtimeMsg = match.msg;
+            isRealtimeEnhanced = true;
+          }
         }
 
-        segments.push({
-          trafficType: 3,
-          sectionTime: walkMin,
-          startName: segments.at(-1)?.endName ?? "",
-          endName: nextSubway?.startStation?.stationName ?? "",
-          realtimeWaitMinutes: realtimeWait,
-          realtimeArrivalMsg: realtimeMsg,
-        });
-        adjustedTotal += walkMin + (realtimeWait ?? 3);
+        // 도보 구간 표시 (환승이든 아니든 도보 시간은 포함)
+        const walkMin = sp.sectionTime;
+        adjustedTotal += walkMin;
+
+        // 환승 대기시간은 실제 환승 구간에만 추가
+        if (isTransfer) {
+          const waitMin = realtimeWait ?? 3; // 실시간 없으면 기본 3분
+          adjustedTotal += waitMin;
+
+          segments.push({
+            trafficType: 3,
+            sectionTime: walkMin,
+            startName: segments.at(-1)?.endName ?? "",
+            endName: nextSubway.startStation?.stationName ?? "",
+            realtimeWaitMinutes: realtimeWait,
+            realtimeArrivalMsg: realtimeMsg,
+          });
+        }
+        // 첫 도보(출발지→역) / 마지막 도보(역→목적지)는 segments에 추가 안 함
       }
     }
 
-    return { totalMinutes: path.info.totalTime, adjustedTotalMinutes: Math.round(adjustedTotal), transferCount: path.info.transferCount, stationCount: path.info.totalStationCount, cost: path.info.payment, segments, isRealtimeEnhanced } satisfies Omit<ClientRoute, "label">;
+    return {
+      totalMinutes: path.info.totalTime,
+      adjustedTotalMinutes: Math.round(adjustedTotal),
+      transferCount: path.info.transferCount,
+      stationCount: path.info.totalStationCount,
+      cost: path.info.payment,
+      segments,
+      isRealtimeEnhanced,
+    } satisfies Omit<ClientRoute, "label">;
   });
 
   routes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes);
