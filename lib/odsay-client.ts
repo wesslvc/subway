@@ -29,6 +29,28 @@ function getHeadwayMin(lineCode: number): number {
   return Math.round((isPeak ? peak : offpeak) / 2);
 }
 
+// ─── ODsay subwayCode → Seoul API subwayId 매핑 ────────────────────────────────
+// 1~9호선은 직접 매칭(1005=5호선), 그 외 노선은 별도 매핑 필요
+const SUBWAY_ID_MAP: Record<number, string> = {
+  1: "1001", 2: "1002", 3: "1003", 4: "1004", 5: "1005",
+  6: "1006", 7: "1007", 8: "1008", 9: "1009",
+  100: "1071", // 인천1호선
+  101: "1075", // 분당선
+  102: "1065", // 공항철도
+  103: "1063", // 경의중앙선
+  104: "1067", // 경춘선
+  105: "1077", // 신분당선
+  107: "1092", // 인천2호선
+  108: "1075", // 수인선 (분당선과 통합 → 동일 ID)
+  110: "1093", // 우이신설선
+  111: "1094", // 김포골드라인
+  112: "1081", // 서해선
+};
+
+function getSubwayId(lineCode: number): string {
+  return SUBWAY_ID_MAP[lineCode] ?? `1${String(lineCode).padStart(3, "0")}`;
+}
+
 // ─── 공유 타입 ─────────────────────────────────────────────────────────────────
 
 export interface ClientSubPath {
@@ -221,7 +243,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
     if (firstSubway) {
       const depName = firstSubway.startStation?.stationName ?? firstSubway.startName ?? "";
       const depCode = firstSubway.lane?.[0]?.subwayCode ?? 0;
-      const depId = `1${String(depCode).padStart(3, "0")}`;
+      const depId = getSubwayId(depCode);
       const depWay = firstSubway.way;
 
       const depData = arrivals[depName];
@@ -299,7 +321,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
 
         const stationName = nextSub.startStation?.stationName ?? nextSub.startName ?? "";
         const lineCode = nextSub.lane?.[0]?.subwayCode ?? 0;
-        const subwayId = `1${String(lineCode).padStart(3, "0")}`;
+        const subwayId = getSubwayId(lineCode);
         const walkMin = sp.sectionTime;
         const arrivalAtTransferSec = (cumulativeMin + walkMin) * 60;
 
