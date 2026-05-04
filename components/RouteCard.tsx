@@ -105,7 +105,7 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
           ))}
         </div>
 
-        {/* Transfer wait info — always shown for transfer segments */}
+        {/* Transfer wait info */}
         {route.segments.some((s) => s.trafficType === 3) && (
           <div
             style={{
@@ -126,13 +126,17 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
                     fontSize: "0.7rem",
                     fontWeight: 600,
                     letterSpacing: "0.05em",
-                    color: s.realtimeArrivalMsg ? "#22C55E" : "#888",
+                    color: s.realtimeError ? "#EF4444" : "#22C55E",
                   }}
                 >
                   {s.endName}{" "}
-                  {s.realtimeArrivalMsg
-                    ? `다음열차 ${s.realtimeArrivalMsg}`
-                    : `대기 약 ${s.realtimeWaitMinutes ?? 3}분`}
+                  {s.realtimeError
+                    ? `오류 (${s.realtimeError})`
+                    : s.realtimeWaitMinutes === 0
+                      ? "바로 탑승"
+                      : s.realtimeWaitMinutes != null
+                        ? `대기 ${s.realtimeWaitMinutes}분`
+                        : "-"}
                 </div>
               ))}
           </div>

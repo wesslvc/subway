@@ -24,8 +24,9 @@ export interface ClientSubPath {
   lineColor?: string;
   direction?: string;
   stations?: { index: number; name: string; id: string }[];
-  realtimeWaitMinutes?: number | null;
-  realtimeArrivalMsg?: string;
+  realtimeWaitMinutes?: number | null; // 환승 대기시간 (null = 실시간 없음)
+  realtimeArrivalMsg?: string;         // 실시간 도착 메시지
+  realtimeError?: string;              // 수집 오류 메시지 (에러코드 포함)
 }
 
 export interface ClientRoute {
@@ -46,7 +47,11 @@ export interface TransferPoint {
   walkMinutes: number; // 환승 도보 시간
 }
 
-export type RealtimeArrivals = Record<string, { subwayId: string; waitMinutes: number; msg: string }[]>;
+// 실시간 도착 데이터 — raw 초 단위로 저장, 에러 포함
+export type RealtimeArrivals = Record<string, {
+  list: { subwayId: string; barvlDt: number; msg: string }[]; // barvlDt = 초 단위 잔여 시간
+  error?: string; // API 오류 메시지 (에러코드 포함)
+}>;
 
 // ─── ODsay 내부 타입 ──────────────────────────────────────────────────────────
 
@@ -105,8 +110,6 @@ export async function odsaySearchRoutes(sx: number, sy: number, ex: number, ey: 
 
 // ─── 환승역 수집 ──────────────────────────────────────────────────────────────
 
-// subPath에서 연속된 지하철 구간 사이의 환승 도보만 추출
-// 출발지→역 도보 / 역→목적지 도보는 제외
 export function collectTransferPoints(paths: OdsayPath[]): TransferPoint[] {
   const seen = new Set<string>();
   const points: TransferPoint[] = [];
@@ -118,7 +121,7 @@ export function collectTransferPoints(paths: OdsayPath[]): TransferPoint[] {
 
       const hasPrevSubway = subPaths.slice(0, i).some((s) => s.trafficType === 1);
       const nextSubway = subPaths.slice(i + 1).find((s) => s.trafficType === 1);
-      if (!hasPrevSubway || !nextSubway) continue; // 출발/도착 도보는 무시
+      if (!hasPrevSubway || !nextSubway) continue;
 
       const stationName = nextSubway.startStation?.stationName ?? nextSubway.startName ?? "";
       const lineCode = nextSubway.lane?.[0]?.subwayCode ?? 0;
@@ -137,7 +140,7 @@ export function collectTransferPoints(paths: OdsayPath[]): TransferPoint[] {
 export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeArrivals): ClientRoute[] {
   const routes = paths.map((path) => {
     const segments: ClientSubPath[] = [];
-    let adjustedTotal = 0;
+    let cumulativeMin = 0; // 출발 시점으로부터 경과 분 (실시간 대기 포함)
     let isRealtimeEnhanced = false;
 
     const subPaths = path.subPath;
@@ -163,41 +166,64 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             index: s.index, name: s.stationName, id: String(s.stationID),
           })),
         });
-        adjustedTotal += sp.sectionTime;
+        cumulativeMin += sp.sectionTime;
 
       } else if (sp.trafficType === 3) {
-        // 도보 구간 — 앞뒤로 지하철이 있는 경우만 환승 처리
+        // 도보 — 앞뒤로 지하철이 있는 경우만 환승 처리
         const hasPrevSubway = subPaths.slice(0, i).some((s) => s.trafficType === 1);
         const nextSubway = subPaths.slice(i + 1).find((s) => s.trafficType === 1);
         if (!hasPrevSubway || !nextSubway) continue; // 출발/도착 도보 스킵
 
         const stationName = nextSubway.startStation?.stationName ?? nextSubway.startName ?? "";
         const lineCode = nextSubway.lane?.[0]?.subwayCode ?? 0;
-        // ODsay subwayCode → 실시간 API subwayId 변환 (1→"1001", 2→"1002", ...)
         const subwayId = `1${String(lineCode).padStart(3, "0")}`;
         const walkMin = sp.sectionTime;
 
-        let realtimeWait: number | null = null;
-        let realtimeMsg: string | undefined;
+        // 사용자가 환승역에 도착하는 예상 시각 (현재 기준 초)
+        const arrivalAtTransferSec = (cumulativeMin + walkMin) * 60;
 
-        const stationArrivals = arrivals[stationName] ?? [];
-        const match = stationArrivals.find((a) => a.subwayId === subwayId);
-        if (match) {
-          realtimeWait = match.waitMinutes;
-          realtimeMsg = match.msg;
-          isRealtimeEnhanced = true;
+        let realtimeWaitMin: number | null = null;
+        let realtimeMsg: string | undefined;
+        let realtimeError: string | undefined;
+
+        const stationData = arrivals[stationName];
+        if (!stationData) {
+          // 실시간 데이터 요청 자체가 없었음
+          realtimeError = "데이터 없음";
+        } else if (stationData.error) {
+          realtimeError = stationData.error;
+        } else {
+          // 환승역 도착 시각 이후에 오는 해당 노선 첫 번째 열차 탐색
+          const nextTrain = stationData.list
+            .filter((a) => a.subwayId === subwayId && a.barvlDt >= arrivalAtTransferSec)
+            .sort((a, b) => a.barvlDt - b.barvlDt)[0];
+
+          if (nextTrain) {
+            // 실제 대기 = 열차 도착까지 남은 시간 - 사용자가 역에 도착하기까지 남은 시간
+            realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
+            realtimeMsg = nextTrain.msg;
+            isRealtimeEnhanced = true;
+          } else if (stationData.list.filter((a) => a.subwayId === subwayId).length > 0) {
+            // 해당 노선 데이터는 있지만 도착 시각 이후 열차가 없음 (데이터 범위 초과)
+            realtimeError = "범위 초과 (도착 시각 이후 열차 정보 없음)";
+          } else {
+            // 해당 노선 자체 데이터 없음
+            realtimeError = "해당 노선 정보 없음";
+          }
         }
 
-        const waitMin = realtimeWait ?? 3;
-        adjustedTotal += walkMin + waitMin;
+        // adjustedTotal 계산: 실시간 있으면 실제 대기, 없으면 폴백 3분 (UI에는 오류 표시)
+        const waitMin = realtimeWaitMin ?? 3;
+        cumulativeMin += walkMin + waitMin;
 
         segments.push({
           trafficType: 3,
           sectionTime: walkMin,
           startName: segments.at(-1)?.endName ?? "",
           endName: stationName,
-          realtimeWaitMinutes: waitMin,       // 실시간이면 실시간값, 없으면 기본 3분
-          realtimeArrivalMsg: realtimeMsg,    // 실시간일 때만 존재 (없으면 undefined)
+          realtimeWaitMinutes: realtimeWaitMin,
+          realtimeArrivalMsg: realtimeMsg,
+          realtimeError,
         });
       }
       // trafficType === 2 (버스) 완전 무시
@@ -209,7 +235,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
 
     return {
       totalMinutes: path.info.totalTime,
-      adjustedTotalMinutes: Math.round(adjustedTotal),
+      adjustedTotalMinutes: Math.round(cumulativeMin),
       transferCount,
       stationCount,
       cost: path.info.payment,

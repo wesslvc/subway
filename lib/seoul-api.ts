@@ -211,9 +211,13 @@ export async function getRealtimeArrivals(
 ): Promise<RealtimeArrivalItem[]> {
   const url = `${REALTIME_API_BASE}/${realtimeApiKey}/json/realtimeStationArrival/0/30/${encodeURIComponent(stationName)}`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Realtime arrivals HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`HTTP-${res.status}`);
   const data: RealtimeArrivalResponse = await res.json();
-  if (data.errorMessage?.status !== 200) return [];
+  if (data.errorMessage?.status !== 200) {
+    const code = data.errorMessage?.code ?? "UNKNOWN";
+    const msg = data.errorMessage?.message ?? "알 수 없는 오류";
+    throw new Error(`${code}: ${msg}`);
+  }
   return data.realtimeArrivalList ?? [];
 }
 

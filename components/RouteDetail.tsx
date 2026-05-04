@@ -264,35 +264,42 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
         <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#666" }}>
           {seg.startName} 환승 · 도보 {seg.sectionTime}분
         </div>
-        <div
-          style={{
-            fontSize: "0.8rem",
-            fontWeight: 700,
-            marginTop: 3,
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            color: seg.realtimeArrivalMsg ? "#22C55E" : "#888",
-          }}
-        >
-          {seg.realtimeArrivalMsg ? (
-            <>
-              <span
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: "50%",
-                  backgroundColor: "#22C55E",
-                  display: "inline-block",
-                  animation: "blink 1.8s ease-in-out infinite",
-                }}
-              />
-              다음 열차 {seg.realtimeArrivalMsg}
-            </>
-          ) : (
-            <>대기 약 {seg.realtimeWaitMinutes ?? 3}분</>
-          )}
-        </div>
+        {seg.realtimeError ? (
+          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#EF4444", marginTop: 3 }}>
+            실시간 수집 오류 ({seg.realtimeError})
+          </div>
+        ) : seg.realtimeWaitMinutes != null ? (
+          <div
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 700,
+              color: "#22C55E",
+              marginTop: 3,
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                backgroundColor: "#22C55E",
+                display: "inline-block",
+                animation: "blink 1.8s ease-in-out infinite",
+              }}
+            />
+            {seg.realtimeWaitMinutes === 0
+              ? "도착 시 바로 탑승 가능"
+              : `대기 ${seg.realtimeWaitMinutes}분`}
+            {seg.realtimeArrivalMsg && (
+              <span style={{ color: "#16A34A", fontSize: "0.7rem" }}>
+                ({seg.realtimeArrivalMsg})
+              </span>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
