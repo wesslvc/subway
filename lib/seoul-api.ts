@@ -32,7 +32,7 @@ export async function getRealtimeArrivals(
 ): Promise<RealtimeArrivalItem[]> {
   // "역" 제거 후 API 호출 (Seoul API DB는 "역" 없는 표기 사용)
   const apiName = stationName.endsWith("역") ? stationName.slice(0, -1) : stationName;
-  const url = `${REALTIME_BASE}/${apiKey}/json/realtimeStationArrival/0/60/${encodeURIComponent(apiName)}`;
+  const url = `${REALTIME_BASE}/${apiKey}/json/realtimeStationArrival/0/200/${encodeURIComponent(apiName)}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP-${res.status}`);
 
@@ -63,6 +63,13 @@ export async function getRealtimeArrivals(
     return ensureArray(inner.row as RealtimeArrivalItem[] | undefined);
   }
 
-  // 알 수 없는 구조 — 실제 응답 일부를 에러에 포함
+  // 구조 C: flat { code, message, status } at root (에러 응답)
+  if (typeof data.code === "string") {
+    if (data.code !== "INFO-000") {
+      throw new Error(`${data.code}: ${(data.message as string) ?? "오류"}`);
+    }
+    return [];
+  }
+
   throw new Error(`STRUCT-ERR: ${text.slice(0, 200)}`);
 }

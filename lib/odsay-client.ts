@@ -10,6 +10,25 @@ const LINE_COLORS: Record<number, string> = {
   108: "#D4003B", 109: "#B0CE18", 110: "#8BCBC8", 111: "#AD8605", 112: "#FABE00",
 };
 
+// ─── 노선별 배차 간격 (분) [peak, offpeak] ────────────────────────────────────
+// peak = 평일 7-9시, 18-20시 / offpeak = 그 외
+const LINE_HEADWAY: Record<number, [number, number]> = {
+  1: [5, 8], 2: [3, 5], 3: [4, 6], 4: [4, 7],
+  5: [5, 8], 6: [5, 8], 7: [5, 8], 8: [6, 10], 9: [5, 8],
+  // 경전철 등
+  100: [8, 12], 101: [8, 12], 102: [8, 12], 103: [8, 12],
+  104: [8, 12], 105: [8, 12], 106: [8, 12], 107: [8, 12],
+  108: [8, 12], 109: [8, 12], 110: [8, 12], 111: [8, 12], 112: [8, 12],
+};
+
+function getHeadwayMin(lineCode: number): number {
+  const now = new Date();
+  const h = now.getHours();
+  const isPeak = (h >= 7 && h < 9) || (h >= 18 && h < 20);
+  const [peak, offpeak] = LINE_HEADWAY[lineCode] ?? [8, 12];
+  return Math.round((isPeak ? peak : offpeak) / 2);
+}
+
 // ─── 공유 타입 ─────────────────────────────────────────────────────────────────
 
 export interface ClientSubPath {
@@ -25,7 +44,8 @@ export interface ClientSubPath {
   stations?: { index: number; name: string; id: string }[];
   realtimeWaitMinutes?: number | null;
   realtimeArrivalMsg?: string;
-  realtimeError?: string;
+  realtimeError?: string;    // 실시간 오류 (표시용)
+  realtimeIsTimetable?: boolean; // true = 시간표 기반 추정
 }
 
 export interface ClientRoute {
@@ -41,6 +61,7 @@ export interface ClientRoute {
   departureArrivalMsg?: string;         // 출발역 실시간 메시지
   departureDirection?: string;          // 행선지 "방화행", "외선순환" 등
   departureError?: string;             // 출발역 실시간 오류
+  departureIsTimetable?: boolean;       // true = 시간표 기반 추정
 }
 
 export interface TransferPoint {
@@ -195,6 +216,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
     let departureDirection: string | undefined;
     let departureError: string | undefined;
 
+    let departureIsTimetable = false;
+
     if (firstSubway) {
       const depName = firstSubway.startStation?.stationName ?? firstSubway.startName ?? "";
       const depCode = firstSubway.lane?.[0]?.subwayCode ?? 0;
@@ -226,6 +249,12 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
         } else {
           departureError = "출발 열차 정보 없음";
         }
+      }
+
+      // 실시간 실패 시 시간표 기반 추정
+      if (departureWaitMinutes === null) {
+        departureWaitMinutes = getHeadwayMin(depCode);
+        departureIsTimetable = true;
       }
     }
 
@@ -270,6 +299,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
         let realtimeMsg: string | undefined;
         let realtimeError: string | undefined;
 
+        let realtimeIsTimetable = false;
+
         const stData = arrivals[stationName];
         if (!stData) {
           realtimeError = "데이터 없음";
@@ -291,7 +322,13 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           }
         }
 
-        cumulativeMin += walkMin + (realtimeWaitMin ?? 3);
+        // 실시간 실패 시 시간표 기반 추정
+        if (realtimeWaitMin === null) {
+          realtimeWaitMin = getHeadwayMin(lineCode);
+          realtimeIsTimetable = true;
+        }
+
+        cumulativeMin += walkMin + realtimeWaitMin;
 
         segments.push({
           trafficType: 3,
@@ -301,6 +338,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           realtimeWaitMinutes: realtimeWaitMin,
           realtimeArrivalMsg: realtimeMsg,
           realtimeError,
+          realtimeIsTimetable,
         });
       }
     }
@@ -321,6 +359,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       departureArrivalMsg,
       departureDirection,
       departureError,
+      departureIsTimetable,
     } satisfies Omit<ClientRoute, "label">;
   });
 

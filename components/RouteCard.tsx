@@ -82,36 +82,54 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
         {/* Departure wait + transfer waits */}
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #1E1E1E", display: "flex", flexDirection: "column", gap: 4 }}>
           {/* 출발역 대기 */}
-          {route.departureError ? (
-            <div style={{ fontSize: "0.68rem", color: "#EF4444", fontWeight: 600 }}>
-              출발 실시간 오류 ({route.departureError})
-            </div>
-          ) : route.departureWaitMinutes != null ? (
-            <div style={{ fontSize: "0.68rem", color: "#22C55E", fontWeight: 700, display: "flex", gap: 6 }}>
-              <span>첫 열차</span>
-              {route.departureDirection && (
-                <span style={{ color: "#16A34A", fontWeight: 800 }}>{route.departureDirection}</span>
-              )}
-              <span>
-                {route.departureWaitMinutes === 0 ? "곧 출발" : `${route.departureWaitMinutes}분 후`}
-              </span>
-              {route.departureArrivalMsg && (
-                <span style={{ color: "#555" }}>({route.departureArrivalMsg})</span>
+          {route.departureWaitMinutes != null ? (
+            <div style={{ fontSize: "0.68rem", fontWeight: 700, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              {route.departureIsTimetable ? (
+                <>
+                  <span style={{ color: "#666" }}>시간표</span>
+                  <span style={{ color: "#888" }}>~{route.departureWaitMinutes}분 대기</span>
+                  {route.departureError && (
+                    <span style={{ color: "#555", fontWeight: 500 }}>({route.departureError})</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span style={{ color: "#22C55E" }}>첫 열차</span>
+                  {route.departureDirection && (
+                    <span style={{ color: "#16A34A", fontWeight: 800 }}>{route.departureDirection}</span>
+                  )}
+                  <span style={{ color: "#22C55E" }}>
+                    {route.departureWaitMinutes === 0 ? "곧 출발" : `${route.departureWaitMinutes}분 후`}
+                  </span>
+                  {route.departureArrivalMsg && (
+                    <span style={{ color: "#555" }}>({route.departureArrivalMsg})</span>
+                  )}
+                </>
               )}
             </div>
           ) : null}
 
           {/* 환승역 대기 */}
           {route.segments.filter((s) => s.trafficType === 3).map((s, i) => (
-            <div key={i} style={{ fontSize: "0.68rem", fontWeight: 600, color: s.realtimeError ? "#EF4444" : "#60A5FA" }}>
-              {s.endName} 환승 ·{" "}
-              {s.realtimeError
-                ? `오류 (${s.realtimeError})`
-                : s.realtimeWaitMinutes === 0
-                  ? "바로 탑승"
-                  : s.realtimeWaitMinutes != null
-                    ? `대기 ${s.realtimeWaitMinutes}분`
-                    : "-"}
+            <div key={i} style={{ fontSize: "0.68rem", fontWeight: 600, display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ color: "#555" }}>{s.endName} 환승 ·</span>
+              {s.realtimeIsTimetable ? (
+                <>
+                  <span style={{ color: "#666" }}>시간표</span>
+                  <span style={{ color: "#888" }}>~{s.realtimeWaitMinutes}분 대기</span>
+                  {s.realtimeError && (
+                    <span style={{ color: "#444", fontWeight: 500 }}>({s.realtimeError})</span>
+                  )}
+                </>
+              ) : s.realtimeError ? (
+                <span style={{ color: "#EF4444" }}>오류 ({s.realtimeError})</span>
+              ) : s.realtimeWaitMinutes === 0 ? (
+                <span style={{ color: "#60A5FA" }}>바로 탑승</span>
+              ) : s.realtimeWaitMinutes != null ? (
+                <span style={{ color: "#60A5FA" }}>대기 {s.realtimeWaitMinutes}분</span>
+              ) : (
+                <span style={{ color: "#555" }}>-</span>
+              )}
             </div>
           ))}
         </div>
