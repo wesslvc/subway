@@ -134,8 +134,12 @@ export async function searchLocation(
 ): Promise<LocationItem[]> {
   const url = `${ROUTE_API_BASE}/${routeApiKey}/json/getLocationInfoList/1/10/${encodeURIComponent(name)}/`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Location search HTTP ${res.status}`);
-  const data = await res.json();
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Location search HTTP ${res.status}: ${text.slice(0, 200)}`);
+  let data: Record<string, unknown>;
+  try { data = JSON.parse(text); } catch {
+    throw new Error(`Location search returned non-JSON: ${text.slice(0, 200)}`);
+  }
   return parseSeoulResponse<LocationItem>(data, "getLocationInfoList");
 }
 
@@ -152,8 +156,12 @@ export async function getSubwayRoutes(
 ): Promise<RouteItem[]> {
   const url = `${ROUTE_API_BASE}/${routeApiKey}/json/getPathInfoBySubwayList/1/${count}/${startX}/${startY}/${endX}/${endY}/`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Route search HTTP ${res.status}`);
-  const data = await res.json();
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Route search HTTP ${res.status}: ${text.slice(0, 200)}`);
+  let data: Record<string, unknown>;
+  try { data = JSON.parse(text); } catch {
+    throw new Error(`Route search returned non-JSON: ${text.slice(0, 200)}`);
+  }
   const rows = parseSeoulResponse<Record<string, unknown>>(data, "getPathInfoBySubwayList");
 
   // Normalize row format: the API may return subPaths as nested JSON string or array
