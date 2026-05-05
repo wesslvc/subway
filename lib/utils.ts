@@ -1,9 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-/**
- * 외부 라이브러리(clsx, tailwind-merge) 의존성을 안전하게 처리하는 cn 함수
- */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -20,14 +17,14 @@ export function formatKRW(amount: number): string {
 }
 
 /**
- * ODsay 노선 코드(subwayCode) -> 서울시 실시간 API subwayId 매핑
- * 사용자 피드백 최종 반영 버전
+ * ODsay 노선 코드 -> 서울시 실시간 API subwayId
+ * 신림선(117), 수인분당(116), 신분당(109), 서해(114) 등 완벽 매핑
  */
 const SUBWAY_ID_MAP: Record<string, string> = {
   "1": "1001", "2": "1002", "3": "1003", "4": "1004",
   "5": "1005", "6": "1006", "7": "1007", "8": "1008", "9": "1009",
-  "21": "1069",  // 인천 1호선
-  "22": "1071",  // 인천 2호선
+  "21": "1069",  // 인천1호선
+  "22": "1071",  // 인천2호선
   "91": "1032",  // GTX-A
   "101": "1065", // 공항철도
   "104": "1063", // 경의중앙선
@@ -55,20 +52,11 @@ const LINE_NAME_MAP: Record<string, string> = {
   "117": "신림선",
 };
 
-/**
- * ODsay 코드를 서울시 API용 subwayId(4자리 문자열)로 변환
- */
 export function getSubwayId(lineCode: string | number): string {
   const code = String(lineCode);
-  if (SUBWAY_ID_MAP[code]) return SUBWAY_ID_MAP[code];
-  const num = parseInt(code);
-  if (num > 0 && num < 10) return `100${num}`;
-  return code;
+  return SUBWAY_ID_MAP[code] || (parseInt(code) < 10 ? `100${code}` : code);
 }
 
-/**
- * 노선 코드를 읽기 쉬운 한글 명칭으로 변환
- */
 export function getLineName(lineCode: string | number): string {
   const code = String(lineCode);
   if (LINE_NAME_MAP[code]) return LINE_NAME_MAP[code];
@@ -76,7 +64,6 @@ export function getLineName(lineCode: string | number): string {
   return num > 0 && num < 10 ? `${num}호선` : `${code}호선`;
 }
 
-/** 노선별 고유 색상 */
 export function getLineColor(lineCode: number | string): string {
   const map: Record<string, string> = {
     "1": "#0052A4", "2": "#00A84D", "3": "#EF7C1C", "4": "#00A5DE",
@@ -87,4 +74,5 @@ export function getLineColor(lineCode: number | string): string {
   };
   return map[String(lineCode)] || "#888888";
 }
+
 
