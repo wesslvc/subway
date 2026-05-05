@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
               updnLine: a.updnLine,
               arvlCd: a.arvlCd ?? "",
             }))
-            .filter((a) => !isNaN(a.barvlDt) && a.barvlDt >= 0),
+            .filter((a) => !isNaN(a.barvlDt)),  // 음수 barvlDt 보존 → 운행종료 감지용
         };
       } catch (e) {
         arrivals[name] = {

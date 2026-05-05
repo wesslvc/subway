@@ -208,6 +208,22 @@ function hasReliableEta(a: ArrivalItem): boolean {
   return a.barvlDt > 0 || a.arvlCd === "0";
 }
 
+// barvlDt=0 이고 ETA 불명확할 때 msg에서 "N전역출발" 파싱 → 역 개수×2분 추정
+// 실시간 데이터를 버리지 않고 최대한 활용. 실시간 barvlDt가 있으면 이 함수는 사용 안 함.
+function estimateMinutesFromMsg(msg: string): number | null {
+  if (!msg) return null;
+  // "3번째전역출발", "8번째 전역 출발" 등
+  let m = msg.replace(/\s/g, "").match(/(\d+)번째전역출발/);
+  if (m) return parseInt(m[1], 10) * 2;
+  // "전전역출발" → 2역
+  if (msg.replace(/\s/g, "").includes("전전역출발")) return 4;
+  // "전역출발" → 1역
+  if (msg.replace(/\s/g, "").includes("전역출발")) return 2;
+  // "전역도착", "전역진입" → 곧 도착, 1분
+  if (msg.replace(/\s/g, "").match(/전역(도착|진입)/)) return 1;
+  return null;
+}
+
 function getDirectionalTrains(
   lineTrains: ArrivalItem[],
   passStationNames: string[],  // ODsay passStopList[1:] 후속역 배열
@@ -234,30 +250,41 @@ function getDirectionalTrains(
   const wayNorm = way ? normForMatch(way) : "";
   const endNorm = endStationName ? normForMatch(endStationName) : (passNorm.at(-1) ?? "");
 
-  // ② bstatnNm 기반 매칭 — 분기 노선 엄격 구분 + 중간기착행 제외 (최우선)
-  //    validSet = {구간 목표역, way 종착역} 만 허용
-  //    중간역(목표역 이전)을 종착으로 하는 열차는 제외
+  // ── 중간기착 사전 제외 ────────────────────────────────────────────────────────
+  // passStopList에 들어있는 역(= 이 구간의 경유역들)이면서 endpoint가 아닌 역을 종착으로
+  // 하는 열차는 "중간기착행"으로 판정해 pool에서 먼저 제거한다.
+  // 이 필터를 bstatnNm 매칭과 hint 매칭 양쪽에 적용해야
+  // "강동行 trainLineNm에 강동방면 힌트가 있어 hint 매칭으로 포함되던" 버그도 막힌다.
   //
-  //    예) 강동→오금(마천 branch): validSet = {오금, 마천}
-  //        마천行 bstatnNm="마천" → 포함 ✓
-  //        하남검단산行 bstatnNm="하남검단산" → 제외 ✓
-  //        오금行(단거리 회차) bstatnNm="오금" → 포함 ✓
-  //        둔촌동行(중간기착) bstatnNm="둔촌동" → 제외 ✓ (기존엔 포함됐던 버그)
+  // passStopList에 없는 역(구간 너머 종착, e.g. way)은 통과행이므로 허용.
+  //   강동→마천 구간: pool에서 둔촌동行(중간기착) 제거, 마천行·방화行(통과) 유지
+  const passNormSet = new Set(passNorm);
+  const filteredPool = (endNorm && passNorm.length > 0)
+    ? pool.filter(a => {
+        const b = normForMatch(a.bstatnNm);
+        return !(passNormSet.has(b) && b !== endNorm);
+      })
+    : pool;
+
   const validSet = new Set([endNorm, wayNorm].filter(Boolean));
+
+  // ② bstatnNm 기반 매칭 — 분기 노선 구분 (filteredPool 사용, 중간기착 이미 제거됨)
+  //    validSet = {구간 목표역, way 종착역}
+  //    마천行 ✓  하남검단산行 ✓(경로가 마천인 경우 hint에서 걸러짐)  강동行 ✗
   if (validSet.size > 0) {
-    const bstatnMatch = pool.filter(a => {
+    const bstatnMatch = filteredPool.filter(a => {
       const b = normForMatch(a.bstatnNm);
       return [...validSet].some(v => b === v || b.includes(v) || v.includes(b));
     });
     if (bstatnMatch.length > 0) return bstatnMatch;
   }
 
-  // ③ trainLineNm "방면" 힌트 매칭 (bstatnNm 매칭 실패 시 보조)
-  //    way=종착역이 아닌 segment 끝역일 때, 경유 힌트로 through-train 포착
+  // ③ trainLineNm "방면" 힌트 매칭 (filteredPool 사용)
+  //    bstatnNm 매칭 실패 시에만 사용. 중간기착행은 이미 filteredPool에서 없음.
   //    "마천행 - 둔촌동방면" + passNorm에 "둔촌동" → 매칭 ✓
-  //    "하남검단산행 - 길동방면" + passNorm(마천 branch)에 "길동" 없음 → 제외 ✓
+  //    "하남검단산행 - 암사방면" + passNorm(마천branch)에 "암사" 없음 → 제외 ✓
   if (passNorm.length > 0) {
-    const hintMatch = pool.filter(a => {
+    const hintMatch = filteredPool.filter(a => {
       const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
       const dashIdx = tnm.indexOf("-");
       if (dashIdx < 0) return false;
@@ -268,8 +295,6 @@ function getDirectionalTrains(
   }
 
   // ④ 방향 정보 없음 → pool 전체 (단방향 종점역 등 예외용 마지막 보험)
-  //    way도 passStopList도 없으면 방향 판별 불가 → 어쩔 수 없이 전체 반환
-  //    way나 passStopList가 있었는데 여기 도달하면 해당 방향 열차 없음 → 빈 배열
   if (!wayNorm && passNorm.length === 0) return pool;
   return [];
 }
@@ -452,16 +477,26 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           // 탑승 가능 + ETA 신뢰 가능 열차 우선 선택
           // barvlDt=0 이면서 진입(arvlCd=0) 아닌 열차는 ETA 불명확 → 건너뜀
           const boardable = dirTrains.filter(isBoardable);
-          const first = boardable.find(hasReliableEta);
-          if (first) {
-            departureWaitMinutes = Math.ceil(first.barvlDt / 60);
-            departureArrivalMsg = first.msg;
-            const nextSt = firstSubway.passStopList?.stations[1]?.stationName;
-            departureDirection = formatDirectionByLine(depCode, first.trainLineNm ?? "", first.updnLine ?? "", nextSt);
+          const reliableFirst = boardable.find(hasReliableEta);
+          const nextSt = firstSubway.passStopList?.stations[1]?.stationName;
+          if (reliableFirst) {
+            // 실시간 barvlDt 직접 사용
+            departureWaitMinutes = Math.ceil(reliableFirst.barvlDt / 60);
+            departureArrivalMsg = reliableFirst.msg;
+            departureDirection = formatDirectionByLine(depCode, reliableFirst.trainLineNm ?? "", reliableFirst.updnLine ?? "", nextSt);
             isRealtimeEnhanced = true;
           } else if (boardable.length > 0) {
-            // 열차는 있으나 ETA 불명확(barvlDt=0) → 시간표 fallback
-            departureError = "ETA 미계산";
+            // barvlDt=0 이지만 실시간 열차 존재 → msg 파싱으로 역수×2분 추정
+            const msgFirst = boardable[0];
+            const estimated = estimateMinutesFromMsg(msgFirst.msg);
+            if (estimated !== null) {
+              departureWaitMinutes = estimated;
+              departureArrivalMsg = msgFirst.msg;
+              departureDirection = formatDirectionByLine(depCode, msgFirst.trainLineNm ?? "", msgFirst.updnLine ?? "", nextSt);
+              isRealtimeEnhanced = true;  // 실시간 기반 추정
+            } else {
+              departureError = "ETA 미계산";
+            }
           } else {
             departureError = "해당 방향 대기 중";
           }
