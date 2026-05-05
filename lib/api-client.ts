@@ -1,14 +1,13 @@
 import { RealtimeArrival } from "@/types/subway";
 
-const SEOUL_API_KEY = process.env.NEXT_PUBLIC_SEOUL_API_KEY || "";
-
 function normalizeArrival(raw: Record<string, string>): RealtimeArrival {
   const barvlDt = parseInt(raw.barvlDt || "0", 10);
   const arrivalMinutes = barvlDt === 0 ? 0 : Math.ceil(barvlDt / 60);
 
   return {
     stationName: raw.statnNm || "",
-    line: raw.subwayId || raw.subwayLine || "", // 1075, 1094 등 원본 유지
+    // 중요: subwayId 변조하지 않음 (예: 1075, 1094 원본 유지)
+    line: raw.subwayId || raw.subwayLine || "", 
     direction: raw.trainLineNm || "",
     arrivalMinutes,
     arrivalMessage: raw.arvlMsg2 || `${arrivalMinutes}분 후`,
@@ -22,23 +21,29 @@ function normalizeArrival(raw: Record<string, string>): RealtimeArrival {
 export async function fetchRealtimeArrivals(
   stationName: string
 ): Promise<RealtimeArrival[]> {
-  if (!SEOUL_API_KEY) return [];
-
   try {
-    const cleanName = stationName.replace(/역$/, "");
-    const encoded = encodeURIComponent(cleanName);
-    const url = `http://swopenAPI.seoul.go.kr/api/subway/${SEOUL_API_KEY}/json/realtimeStationArrival/0/20/${encoded}`;
+    const encoded = encodeURIComponent(stationName);
+    const url = `/api/arrivals?station=${encoded}`;
     
     const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return [];
+    
     const data = await res.json();
 
-    if (data.errorMessage && data.errorMessage.status !== 200) return [];
+    if (data.errorMessage && (data.errorMessage.status === 404 || data.errorMessage.status === "ERROR-336")) {
+      return [];
+    }
 
-    const list = data.realtimeArrivalList || [];
-    return list.map((raw: Record<string, string>) => normalizeArrival(raw));
+    const arrivals: RealtimeArrival[] = (data.realtimeArrivalList || []).map(
+      (raw: Record<string, string>) => normalizeArrival(raw)
+    );
+
+    return arrivals;
   } catch (err) {
-    console.error("Seoul API Fetch Error:", err);
+    console.error("Failed to fetch realtime arrivals:", err);
     return [];
   }
 }
+
+
 
