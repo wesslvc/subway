@@ -209,12 +209,16 @@ function getDirectionalTrains(
     pool = lineTrains;
   }
 
-  // ② "다음역방면" 매칭 (가장 신뢰도 높은 직진 방향 신호)
+  // ② "다음역방면" 매칭 — trainLineNm의 " - X방면" 힌트 부분만 체크
+  //    "신길행 - 원당방면" 에서 nextStation=신길이면 terminus 부분이라 제외
+  //    "방화행 - 신길방면" 에서 nextStation=신길이면 방면 부분이라 매칭 ✓
   if (nextStationName) {
     const next = normStation(nextStationName).replace(/\s/g, "");
     const dirMatch = pool.filter(a => {
       const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
-      return tnm.includes(next);
+      const dashIdx = tnm.indexOf("-");
+      const hintPart = dashIdx >= 0 ? tnm.slice(dashIdx + 1) : tnm;
+      return hintPart.includes(next);
     });
     if (dirMatch.length > 0) return dirMatch;
   }
