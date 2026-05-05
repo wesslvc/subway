@@ -63,11 +63,15 @@ const LINE_HEADWAY: Record<number, [number, number]> = {
   21: [10, 15], 22: [10, 15],
 };
 
-function getHeadwayMin(lineCode: number): number {
+function getFullHeadwayMin(lineCode: number): number {
   const h = new Date().getHours();
   const isPeak = (h >= 7 && h < 9) || (h >= 18 && h < 20);
   const [peak, offpeak] = LINE_HEADWAY[lineCode] ?? [8, 12];
-  return Math.round((isPeak ? peak : offpeak) / 2);
+  return isPeak ? peak : offpeak;
+}
+
+function getHeadwayMin(lineCode: number): number {
+  return Math.round(getFullHeadwayMin(lineCode) / 2);
 }
 
 // ─── ODsay subwayCode → Seoul API subwayId 매핑 ──────────────────────────────
@@ -174,10 +178,9 @@ function matchDirection(bstatnNm: string, way: string | undefined): boolean {
 }
 
 // 방향 + 급행 필터
-// ① isExpress면 trainLineNm에 "급행"/"특급" 포함 열차만
-//    반대로 일반이면 급행/특급 열차 제외 (해당 노선에 급행이 존재할 때만)
-// ② way 종착역과 일치하는 열차 우선 (5호선 분기 등 엄격 구분)
-// ③ 없으면 passStopList 경유역 종착 열차 (중간 종착 단거리)
+// ① 급행/일반 분리 (express=true면 급행/특급, false면 일반)
+// ② trainLineNm의 "○○방면" / 다음역 표기로 진행 방향 매칭
+// ③ way (종점)와 일치하는 열차도 매칭 (다음역 정보 없을 때 fallback)
 // ④ 그래도 없으면 빈 배열 → 시간표
 type ArrivalItem = RealtimeArrivals[string]["list"][number];
 
@@ -187,8 +190,8 @@ function isExpressLane(laneName?: string): boolean {
 
 function getDirectionalTrains(
   lineTrains: ArrivalItem[],
-  way: string | undefined,
-  passStationNames: string[],
+  nextStationName: string | undefined,  // 사용자 경로상 다음역
+  way: string | undefined,                // ODsay way (보통 노선 종점)
   express: boolean,
 ): ArrivalItem[] {
   // ① 급행/일반 분리
@@ -206,16 +209,20 @@ function getDirectionalTrains(
     pool = lineTrains;
   }
 
-  if (!way) return pool;
+  // ② "다음역방면" 매칭 (가장 신뢰도 높은 직진 방향 신호)
+  if (nextStationName) {
+    const next = normStation(nextStationName).replace(/\s/g, "");
+    const dirMatch = pool.filter(a => {
+      const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
+      return tnm.includes(next);
+    });
+    if (dirMatch.length > 0) return dirMatch;
+  }
 
-  // ② way 종착역 직접 매칭 (5호선 마천/상일동 등 분기 엄격 구분)
-  const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
-  if (wayMatches.length > 0) return wayMatches;
-
-  // ③ passStopList 경유역 종착 (중간 종착 단거리 열차)
-  if (passStationNames.length > 0) {
-    const onPath = pool.filter(a => passStationNames.includes(normStation(a.bstatnNm)));
-    if (onPath.length > 0) return onPath;
+  // ③ way (종점) 매칭
+  if (way) {
+    const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
+    if (wayMatches.length > 0) return wayMatches;
   }
 
   return [];
@@ -345,9 +352,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       const depCode = firstSubway.lane?.[0]?.subwayCode ?? 0;
       const depId = getSubwayId(depCode);
       const depWay = firstSubway.way;
-      // passStopList 경유역 이름 (출발역 제외, 방향 판별 fallback용)
-      const depPassNames = (firstSubway.passStopList?.stations ?? [])
-        .slice(1).map(s => normStation(s.stationName));
+      // 출발역 다음역 (방향 판별 핵심 신호)
+      const depNextStation = firstSubway.passStopList?.stations[1]?.stationName;
 
       const depData = arrivals[depName];
       if (!depData) {
@@ -364,7 +370,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           departureError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
         } else {
           const isExpressDep = isExpressLane(firstSubway.lane?.[0]?.name);
-          const dirTrains = getDirectionalTrains(lineTrains, depWay, depPassNames, isExpressDep);
+          const dirTrains = getDirectionalTrains(lineTrains, depNextStation, depWay, isExpressDep);
           const first = dirTrains[0];
           if (first) {
             departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
@@ -428,8 +434,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
         const walkMin = sp.sectionTime;
         const arrivalAtTransferSec = (cumulativeMin + walkMin) * 60;
         const transferWay = nextSub.way;
-        const transferPassNames = (nextSub.passStopList?.stations ?? [])
-          .slice(1).map(s => normStation(s.stationName));
+        const transferNextStation = nextSub.passStopList?.stations[1]?.stationName;
 
         let realtimeWaitMin: number | null = null;
         let realtimeMsg: string | undefined;
@@ -451,19 +456,29 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             realtimeError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
           } else {
             const isExpressTransfer = isExpressLane(nextSub.lane?.[0]?.name);
-            const dirTrains = getDirectionalTrains(lineTrains, transferWay, transferPassNames, isExpressTransfer);
-            const nextTrain = dirTrains
-              .filter(a => a.barvlDt >= arrivalAtTransferSec)
-              .sort((a, b) => a.barvlDt - b.barvlDt)[0];
+            const dirTrains = getDirectionalTrains(lineTrains, transferNextStation, transferWay, isExpressTransfer);
 
-            if (nextTrain) {
-              realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
-              realtimeMsg = nextTrain.msg;
-              isRealtimeEnhanced = true;
-            } else if (dirTrains.length > 0) {
-              realtimeError = "범위 초과";
-            } else {
+            if (dirTrains.length === 0) {
               realtimeError = "해당 방향 대기 중";
+            } else {
+              const sorted = [...dirTrains].sort((a, b) => a.barvlDt - b.barvlDt);
+              const nextTrain = sorted.find(a => a.barvlDt >= arrivalAtTransferSec);
+
+              if (nextTrain) {
+                realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
+                realtimeMsg = nextTrain.msg;
+                isRealtimeEnhanced = true;
+              } else {
+                // 도착 시점이 실시간 데이터 범위를 넘음 → 마지막 관측 열차 + 배차간격으로 외삽
+                const last = sorted[sorted.length - 1];
+                const headwaySec = getFullHeadwayMin(lineCode) * 60;
+                let projected = last.barvlDt + headwaySec;
+                while (projected < arrivalAtTransferSec) projected += headwaySec;
+                realtimeWaitMin = Math.max(0, Math.ceil((projected - arrivalAtTransferSec) / 60));
+                realtimeMsg = `최근 관측 ${Math.round(last.barvlDt / 60)}분 후 + 배차 외삽`;
+                realtimeIsTimetable = true;
+                isRealtimeEnhanced = true;
+              }
             }
           }
         }
