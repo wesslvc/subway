@@ -1,4 +1,3 @@
-
 import { RealtimeArrival } from "@/types/subway";
 
 const SEOUL_API_KEY = process.env.NEXT_PUBLIC_SEOUL_API_KEY || "";
@@ -9,7 +8,7 @@ function normalizeArrival(raw: Record<string, string>): RealtimeArrival {
 
   return {
     stationName: raw.statnNm || "",
-    // subwayId 원본 유지 (예: 1075, 1094)
+    // subwayId를 훼손하지 않고 원본 그대로 사용 (예: 1075, 1094)
     line: raw.subwayId || raw.subwayLine || "", 
     direction: raw.trainLineNm || "",
     arrivalMinutes,
@@ -41,7 +40,9 @@ export async function fetchRealtimeArrivals(
     const list = data.realtimeArrivalList || [];
     return list.map((raw: Record<string, string>) => normalizeArrival(raw));
   } catch (err) {
-    console.error("실시간 도착 정보 fetch 실패:", err);
+    console.error("서울시 실시간 API 호출 실패:", err);
     return [];
   }
 }
+
+
