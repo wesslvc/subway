@@ -14,6 +14,7 @@ type ArrivalEntry = {
   bstatnNm: string;
   trainLineNm: string;
   updnLine: string;  // 상행/하행/내선/외선
+  arvlCd: string;    // 0=진입,1=도착,2=출발,3=전역출발,4=전역진입,5=전역도착,99=운행중
 };
 type StationResult = { list: ArrivalEntry[]; error?: string };
 
@@ -43,6 +44,7 @@ export async function GET(req: NextRequest) {
               bstatnNm: a.bstatnNm,
               trainLineNm: a.trainLineNm,
               updnLine: a.updnLine,
+              arvlCd: a.arvlCd ?? "",
             }))
             .filter((a) => !isNaN(a.barvlDt) && a.barvlDt >= 0),
         };

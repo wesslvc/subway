@@ -108,6 +108,7 @@ export interface ClientSubPath {
   realtimeArrivalMsg?: string;
   realtimeError?: string;
   realtimeIsTimetable?: boolean;
+  realtimeDirection?: string;  // 환승 후 탑승 열차 방향 표시
 }
 
 export interface ClientRoute {
@@ -140,6 +141,7 @@ export type RealtimeArrivals = Record<string, {
     bstatnNm: string;
     trainLineNm: string;
     updnLine: string;  // 상행/하행/내선/외선 — 방향 판별용
+    arvlCd: string;    // 0=진입,1=도착,2=출발,...
   }[];
   error?: string;
 }>;
@@ -171,27 +173,39 @@ interface OdsayPath {
 
 const normStation = (s: string) => s.endsWith("역") ? s.slice(0, -1) : s;
 
+// 비교용 정규화: 괄호 부속명 제거, 공백/역 제거
+function normForMatch(s: string): string {
+  return s.replace(/\(.*?\)/g, "").replace(/\s/g, "").replace(/역$/, "");
+}
+
 function matchDirection(bstatnNm: string, way: string | undefined): boolean {
   if (!way) return true;
-  const n = (s: string) => s.replace(/\s/g, "");
-  return n(bstatnNm) === n(way) || n(bstatnNm).includes(n(way)) || n(way).includes(n(bstatnNm));
+  const a = normForMatch(bstatnNm);
+  const b = normForMatch(way);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
 }
 
 // 방향 + 급행 필터
 // ① 급행/일반 분리 (express=true면 급행/특급, false면 일반)
-// ② trainLineNm의 "○○방면" / 다음역 표기로 진행 방향 매칭
-// ③ way (종점)와 일치하는 열차도 매칭 (다음역 정보 없을 때 fallback)
-// ④ 그래도 없으면 빈 배열 → 시간표
+// ② trainLineNm의 "○○방면" 힌트 부분에 사용자 경로상 후속역 중 하나가 포함되면 매칭
+// ③ way 매칭은 "라인 종점으로 보이는 way"에 한해서만 fallback (환승역 = 구간끝일 때 잘못 매칭 방지)
+// ④ arvlCd=1(도착)/2(출발) 열차는 boardable에서 제외 (지금탑승 범위는 접근까지)
 type ArrivalItem = RealtimeArrivals[string]["list"][number];
 
 function isExpressLane(laneName?: string): boolean {
   return !!(laneName?.includes("급행") || laneName?.includes("특급"));
 }
 
+// arvlCd: 1=도착(승강장 도달), 2=출발(이미 떠남) → 탑승 불가로 간주
+function isBoardable(a: ArrivalItem): boolean {
+  return a.arvlCd !== "1" && a.arvlCd !== "2";
+}
+
 function getDirectionalTrains(
   lineTrains: ArrivalItem[],
-  nextStationName: string | undefined,  // 사용자 경로상 다음역
-  way: string | undefined,                // ODsay way (보통 노선 종점)
+  passStationNames: string[],            // 사용자 경로상 출발역 이후 후속역들 (passStopList[1:])
+  way: string | undefined,                // ODsay way
   express: boolean,
 ): ArrivalItem[] {
   // ① 급행/일반 분리
@@ -209,45 +223,67 @@ function getDirectionalTrains(
     pool = lineTrains;
   }
 
-  // ② "다음역방면" 매칭 — trainLineNm의 " - X방면" 힌트 부분만 체크
-  //    "신길행 - 원당방면" 에서 nextStation=신길이면 terminus 부분이라 제외
-  //    "방화행 - 신길방면" 에서 nextStation=신길이면 방면 부분이라 매칭 ✓
-  if (nextStationName) {
-    const next = normStation(nextStationName).replace(/\s/g, "");
+  // ② trainLineNm "방면" 힌트 매칭 (다음역 + 후속역 어느 하나라도 hint에 포함되면 같은 방향)
+  //    "마천행 - 둔촌동방면"에서 nextStation=둔촌동이면 매칭 ✓ (오금행 단거리 회차도 같은 힌트라 통과)
+  //    "하남검단산행 - 길동방면"은 길동(타 분기) → 매칭 X
+  //    "신길행 - 원당방면"의 terminus=신길은 hint 밖이라 잘못 매칭 안됨
+  const passNorm = passStationNames.map(normForMatch).filter(Boolean);
+  if (passNorm.length > 0) {
     const dirMatch = pool.filter(a => {
       const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
       const dashIdx = tnm.indexOf("-");
-      const hintPart = dashIdx >= 0 ? tnm.slice(dashIdx + 1) : tnm;
-      return hintPart.includes(next);
+      if (dashIdx < 0) return false;          // hint 없는 경우는 ②에서 매칭 보류
+      const hintPart = normForMatch(tnm.slice(dashIdx + 1));
+      return passNorm.some(n => hintPart.includes(n));
     });
     if (dirMatch.length > 0) return dirMatch;
   }
 
-  // ③ way (종점) 매칭
+  // ③ way fallback — way가 어떤 후속역과도 일치하지 않으면 (= 라인 종점일 가능성) 종점 매칭 시도
+  //    way가 후속역 중 하나와 같으면 (= 구간끝/환승역) 잘못된 단거리 매칭이므로 skip
   if (way) {
-    const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
-    if (wayMatches.length > 0) return wayMatches;
+    const wNorm = normForMatch(way);
+    const wayIsSegmentEnd = passNorm.includes(wNorm);
+    if (!wayIsSegmentEnd) {
+      const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
+      if (wayMatches.length > 0) return wayMatches;
+    }
   }
 
   return [];
 }
 
-// 2호선 내선/외선 + 다음역 표시
+// 2호선 내선순환/외선순환 + 다음역 표시
 function formatLine2Direction(trainLineNm: string, nextStationName?: string): string {
   const isOuter = trainLineNm.includes("외선");
   const isInner = trainLineNm.includes("내선");
   if (!isOuter && !isInner) return trainLineNm.split(" - ")[0] ?? trainLineNm;
-  const dir = isOuter ? "외선" : "내선";
-  return nextStationName ? `${dir}(다음역: ${nextStationName})` : dir;
+  const dir = isOuter ? "외선순환" : "내선순환";
+  const next = nextStationName ? normStation(nextStationName) : "";
+  return next ? `${dir}(다음역: ${next})` : dir;
 }
 
-// 1·9호선 급행/특급 포함 방향 표시
+// 1·9호선 특급/급행/일반 표시
+//   1호선: 특급, 급행, 일반
+//   9호선: 급행, 일반
 function formatExpressDirection(trainLineNm: string): string {
-  const base = trainLineNm.split(" - ")[0] ?? trainLineNm;
-  if (base.includes("급행") || base.includes("특급")) return base;
-  if (trainLineNm.includes("급행")) return `급행 ${base}`;
+  const base = (trainLineNm.split(" - ")[0] ?? trainLineNm).trim();
+  // 이미 prefix 있으면 그대로
+  if (/^(특급|급행)\s/.test(base)) return base;
   if (trainLineNm.includes("특급")) return `특급 ${base}`;
-  return base;
+  if (trainLineNm.includes("급행")) return `급행 ${base}`;
+  return `일반 ${base}`;
+}
+
+// 노선별 방향 표시 디스패처
+function formatDirectionByLine(
+  lineCode: number,
+  trainLineNm: string,
+  nextStationName?: string,
+): string {
+  if (lineCode === 2) return formatLine2Direction(trainLineNm, nextStationName);
+  if (lineCode === 1 || lineCode === 9) return formatExpressDirection(trainLineNm);
+  return trainLineNm.split(" - ")[0] ?? trainLineNm;
 }
 
 // ─── ODsay API 호출 ───────────────────────────────────────────────────────────
@@ -356,8 +392,9 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       const depCode = firstSubway.lane?.[0]?.subwayCode ?? 0;
       const depId = getSubwayId(depCode);
       const depWay = firstSubway.way;
-      // 출발역 다음역 (방향 판별 핵심 신호)
-      const depNextStation = firstSubway.passStopList?.stations[1]?.stationName;
+      // 출발역 이후 후속역들 (방향 판별 신호)
+      const depPassNames = (firstSubway.passStopList?.stations ?? [])
+        .slice(1).map(s => s.stationName);
 
       const depData = arrivals[depName];
       if (!depData) {
@@ -374,21 +411,15 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           departureError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
         } else {
           const isExpressDep = isExpressLane(firstSubway.lane?.[0]?.name);
-          const dirTrains = getDirectionalTrains(lineTrains, depNextStation, depWay, isExpressDep);
-          const first = dirTrains[0];
+          const dirTrains = getDirectionalTrains(lineTrains, depPassNames, depWay, isExpressDep);
+          // arvlCd=1(도착)/2(출발) 열차는 이미 떠난/떠나는 중 → 다음 열차로 잡음
+          const boardable = dirTrains.filter(isBoardable);
+          const first = boardable[0] ?? dirTrains[0];
           if (first) {
             departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
             departureArrivalMsg = first.msg;
-            // 노선별 방향 표시 포맷
-            const tnm = first.trainLineNm ?? "";
-            if (depCode === 2) {
-              const nextSt = firstSubway.passStopList?.stations[1]?.stationName;
-              departureDirection = formatLine2Direction(tnm, nextSt);
-            } else if (depCode === 1 || depCode === 9) {
-              departureDirection = formatExpressDirection(tnm);
-            } else {
-              departureDirection = tnm.split(" - ")[0] ?? undefined;
-            }
+            const nextSt = firstSubway.passStopList?.stations[1]?.stationName;
+            departureDirection = formatDirectionByLine(depCode, first.trainLineNm ?? "", nextSt);
             isRealtimeEnhanced = true;
           } else {
             departureError = "해당 방향 대기 중";
@@ -438,12 +469,15 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
         const walkMin = sp.sectionTime;
         const arrivalAtTransferSec = (cumulativeMin + walkMin) * 60;
         const transferWay = nextSub.way;
+        const transferPassNames = (nextSub.passStopList?.stations ?? [])
+          .slice(1).map(s => s.stationName);
         const transferNextStation = nextSub.passStopList?.stations[1]?.stationName;
 
         let realtimeWaitMin: number | null = null;
         let realtimeMsg: string | undefined;
         let realtimeError: string | undefined;
         let realtimeIsTimetable = false;
+        let realtimeDirection: string | undefined;
 
         const stData = arrivals[stationName];
         if (!stData) {
@@ -460,17 +494,19 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             realtimeError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
           } else {
             const isExpressTransfer = isExpressLane(nextSub.lane?.[0]?.name);
-            const dirTrains = getDirectionalTrains(lineTrains, transferNextStation, transferWay, isExpressTransfer);
+            const dirTrains = getDirectionalTrains(lineTrains, transferPassNames, transferWay, isExpressTransfer);
 
             if (dirTrains.length === 0) {
               realtimeError = "해당 방향 대기 중";
             } else {
               const sorted = [...dirTrains].sort((a, b) => a.barvlDt - b.barvlDt);
-              const nextTrain = sorted.find(a => a.barvlDt >= arrivalAtTransferSec);
+              // 사용자가 환승역 도달 후에 탑승 가능한 첫 열차 (도착/출발 상태 제외)
+              const nextTrain = sorted.find(a => a.barvlDt >= arrivalAtTransferSec && isBoardable(a));
 
               if (nextTrain) {
                 realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
                 realtimeMsg = nextTrain.msg;
+                realtimeDirection = formatDirectionByLine(lineCode, nextTrain.trainLineNm ?? "", transferNextStation);
                 isRealtimeEnhanced = true;
               } else {
                 // 도착 시점이 실시간 데이터 범위를 넘음 → 마지막 관측 열차 + 배차간격으로 외삽
@@ -480,6 +516,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
                 while (projected < arrivalAtTransferSec) projected += headwaySec;
                 realtimeWaitMin = Math.max(0, Math.ceil((projected - arrivalAtTransferSec) / 60));
                 realtimeMsg = `최근 관측 ${Math.round(last.barvlDt / 60)}분 후 + 배차 외삽`;
+                realtimeDirection = formatDirectionByLine(lineCode, last.trainLineNm ?? "", transferNextStation);
                 realtimeIsTimetable = true;
                 isRealtimeEnhanced = true;
               }
@@ -503,6 +540,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           realtimeArrivalMsg: realtimeMsg,
           realtimeError,
           realtimeIsTimetable,
+          realtimeDirection,
         });
       }
     }

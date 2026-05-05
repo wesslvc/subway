@@ -117,6 +117,9 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
           {route.segments.filter((s) => s.trafficType === 3).map((s, i) => (
             <div key={i} style={{ fontSize: "0.68rem", fontWeight: 600, display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ color: "#555" }}>{s.endName} 환승 ·</span>
+              {s.realtimeDirection && !s.realtimeError && (
+                <span style={{ color: "#93C5FD", fontWeight: 800 }}>{s.realtimeDirection}</span>
+              )}
               {s.realtimeError === "운행종료" ? (
                 <span style={{ color: "#F59E0B", fontWeight: 800 }}>⚑ 운행종료</span>
               ) : s.realtimeIsTimetable ? (
