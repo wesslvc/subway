@@ -204,8 +204,8 @@ function isBoardable(a: ArrivalItem): boolean {
 
 function getDirectionalTrains(
   lineTrains: ArrivalItem[],
-  passStationNames: string[],            // 사용자 경로상 출발역 이후 후속역들 (passStopList[1:])
-  way: string | undefined,                // ODsay way
+  passStationNames: string[],  // ODsay passStopList[1:] 후속역 배열
+  way: string | undefined,     // ODsay way — 해당 방향 종착역 (분기 노선 구분 기준)
   express: boolean,
 ): ArrivalItem[] {
   // ① 급행/일반 분리
@@ -223,35 +223,31 @@ function getDirectionalTrains(
     pool = lineTrains;
   }
 
-  // ② trainLineNm "방면" 힌트 매칭 (다음역 + 후속역 어느 하나라도 hint에 포함되면 같은 방향)
-  //    "마천행 - 둔촌동방면"에서 nextStation=둔촌동이면 매칭 ✓ (오금행 단거리 회차도 같은 힌트라 통과)
-  //    "하남검단산행 - 길동방면"은 길동(타 분기) → 매칭 X
-  //    "신길행 - 원당방면"의 terminus=신길은 hint 밖이라 잘못 매칭 안됨
+  // ② way 직접 매칭 (최우선 — 분기 노선 정확 구분)
+  //    ODsay way = 그 방향의 종착역 (5호선 상일동/마천, 수인분당 인천/신길온천 등)
+  //    wayIsSegmentEnd 억제 없음: way가 구간 끝역이더라도 bstatnNm 비교는 항상 수행
+  if (way) {
+    const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
+    if (wayMatches.length > 0) return wayMatches;
+  }
+
+  // ③ trainLineNm "방면" 힌트 매칭
+  //    way 미지정 또는 way 매칭 실패 시 — 경유역 힌트(방면)로 방향 판별
+  //    "마천행 - 둔촌동방면" + passNorm에 "둔촌동" → 매칭 ✓
+  //    "하남검단산행 - 길동방면" + passNorm에 "둔촌동" → 불일치 ✓ (타 분기 배제)
   const passNorm = passStationNames.map(normForMatch).filter(Boolean);
   if (passNorm.length > 0) {
     const dirMatch = pool.filter(a => {
       const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
       const dashIdx = tnm.indexOf("-");
-      if (dashIdx < 0) return false;          // hint 없는 경우는 ②에서 매칭 보류
+      if (dashIdx < 0) return false;
       const hintPart = normForMatch(tnm.slice(dashIdx + 1));
       return passNorm.some(n => hintPart.includes(n));
     });
     if (dirMatch.length > 0) return dirMatch;
   }
 
-  // ③ way fallback — way가 어떤 후속역과도 일치하지 않으면 (= 라인 종점일 가능성) 종점 매칭 시도
-  //    way가 후속역 중 하나와 같으면 (= 구간끝/환승역) 잘못된 단거리 매칭이므로 skip
-  if (way) {
-    const wNorm = normForMatch(way);
-    const wayIsSegmentEnd = passNorm.includes(wNorm);
-    if (!wayIsSegmentEnd) {
-      const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
-      if (wayMatches.length > 0) return wayMatches;
-    }
-  }
-
-  // ④ 방향 판별 실패 → pool 전체 반환 (최소한 라인 열차는 보여줌)
-  //    환승 종점역(오금 등)은 어차피 모든 열차가 같은 방향이므로 무해
+  // ④ 방향 판별 불가 → pool 전체 (단방향 종점역 등 모든 열차가 같은 방향인 경우 보험)
   return pool;
 }
 
