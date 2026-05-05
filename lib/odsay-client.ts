@@ -6,9 +6,7 @@ import { searchStation, searchRoutes } from "./odsay-api";
 
 const ODSAY_API_KEY = process.env.NEXT_PUBLIC_ODSAY_API_KEY || "";
 
-// ─── page.tsx 에서 요구하는 타입들을 여기서 export 해줍니다 ──────────────────
 export type { RealtimeArrival };
-// page.tsx에서 RealtimeArrivals (복수형)을 찾고 있다면 별칭을 만들어 줍니다.
 export type RealtimeArrivals = RealtimeArrival[];
 
 export interface ClientRouteSegment {
@@ -43,13 +41,14 @@ export interface ClientRoute {
   label?: string;
 }
 
-// ─── page.tsx 에서 호출하는 API 래퍼 함수들 ──────────────────────────────
-export async function odsaySearchStation(name: string) {
-  return searchStation(name, ODSAY_API_KEY);
+// ─── page.tsx 에서 인자 2개를 넘기는 에러를 해결하기 위해 apiKey를 선택적 인자로 추가 ───
+export async function odsaySearchStation(name: string, apiKey?: string) {
+  // 인자로 넘어온 키가 있으면 쓰고, 없으면 환경변수 사용
+  return searchStation(name, apiKey || ODSAY_API_KEY);
 }
 
-export async function odsaySearchRoutes(sx: number, sy: number, ex: number, ey: number) {
-  return searchRoutes(sx, sy, ex, ey, ODSAY_API_KEY);
+export async function odsaySearchRoutes(sx: number, sy: number, ex: number, ey: number, apiKey?: string) {
+  return searchRoutes(sx, sy, ex, ey, apiKey || ODSAY_API_KEY);
 }
 
 export function collectTransferPoints(routes: ClientRoute[]): string[] {
@@ -202,4 +201,6 @@ export function odsayPathsToClientRoutes(
 
   return labeled;
 }
+
+
 
