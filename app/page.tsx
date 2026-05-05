@@ -103,22 +103,28 @@ export default function HomePage() {
             </h1>
           </div>
 
-          <div className="hidden sm:flex items-center gap-1.5">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
-              const colors: Record<number, string> = {
-                1: "#0052A4", 2: "#00A84D", 3: "#EF7C1C", 4: "#00A4E3",
-                5: "#996CAC", 6: "#CD7C2F", 7: "#747F00", 8: "#E6186C", 9: "#BDB092",
-              };
-              return (
-                <div
-                  key={n}
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-white font-black text-xs"
-                  style={{ backgroundColor: colors[n] }}
-                >
-                  {n}
-                </div>
-              );
-            })}
+          <div className="hidden sm:flex items-center gap-1">
+            {[
+              { label: "1", color: "#0052A4", round: true },
+              { label: "2", color: "#00A84D", round: true },
+              { label: "5", color: "#996CAC", round: true },
+              { label: "공항", color: "#0090D2", round: false },
+              { label: "GTX", color: "#9A6292", round: false },
+            ].map(({ label, color, round }) => (
+              <div
+                key={label}
+                className="flex items-center justify-center text-white font-black text-xs"
+                style={{
+                  backgroundColor: color,
+                  borderRadius: round ? "50%" : "2px",
+                  width: round ? "24px" : "auto",
+                  height: "24px",
+                  padding: round ? "0" : "0 5px",
+                }}
+              >
+                {label}
+              </div>
+            ))}
           </div>
         </div>
       </header>
@@ -172,25 +178,25 @@ export default function HomePage() {
 
         {/* Results */}
         {!isLoading && routes.length > 0 && meta && (
-          <div className="flex flex-col lg:flex-row gap-6">
+          <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
 
             {/* ── Left: route list ─────────────────────────── */}
-            <div className="lg:w-[420px] flex-shrink-0">
+            <div className="w-full lg:w-[380px] lg:flex-shrink-0">
               {/* Meta bar */}
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 lg:mb-4">
                 <div
-                  className="text-xs font-bold uppercase tracking-widest"
+                  className="text-xs sm:text-sm font-bold uppercase tracking-widest break-words"
                   style={{ color: "#555", fontFamily: "'Barlow Condensed', sans-serif" }}
                 >
                   {meta.fromName}
                   <span style={{ color: "#2563EB" }}> → </span>
                   {meta.toName}
-                  <span className="ml-2" style={{ color: "#333" }}>
-                    ({routes.length}개 경로)
+                  <span className="block sm:inline sm:ml-2 text-xs" style={{ color: "#333" }}>
+                    ({routes.length}개)
                   </span>
                 </div>
                 {meta.isRealtimeData && (
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1 flex-shrink-0">
                     <div className="w-1.5 h-1.5 rounded-full blink" style={{ backgroundColor: "#22C55E" }} />
                     <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "#22C55E" }}>
                       실시간
@@ -212,15 +218,15 @@ export default function HomePage() {
               </div>
 
               <p
-                className="mt-4 text-xs uppercase tracking-widest text-center"
+                className="mt-3 lg:mt-4 text-xs uppercase tracking-widest text-center"
                 style={{ color: "#333", fontFamily: "'Barlow Condensed', sans-serif" }}
               >
-                {new Date(meta.searchTime).toLocaleTimeString("ko-KR")} 기준
+                {new Date(meta.searchTime).toLocaleTimeString("ko-KR")}
               </p>
             </div>
 
             {/* ── Right: route detail ──────────────────────── */}
-            <div className="flex-1 min-w-0">
+            <div className="w-full lg:flex-1 lg:min-w-0">
               {selectedRoute && (
                 <div className="slide-in">
                   <RouteDetail
@@ -236,52 +242,41 @@ export default function HomePage() {
 
         {/* Empty state */}
         {!isLoading && !error && routes.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 gap-8">
-            {/* Line dots display */}
-            <div className="flex gap-2">
+          <div className="flex flex-col items-center justify-center py-16 sm:py-24 gap-6 sm:gap-8">
+            {/* Line dots display — 숫자 + 특수 노선 혼합 */}
+            <div className="flex gap-2 flex-wrap justify-center">
               {[
-                { n: 5, color: "#996CAC" },
-                { n: 3, color: "#EF7C1C" },
-                { n: 2, color: "#00A84D" },
-                { n: 9, color: "#BDB092" },
-              ].map(({ n, color }) => (
+                { label: "1", color: "#0052A4" },
+                { label: "5", color: "#996CAC" },
+                { label: "공항", color: "#0090D2" },
+                { label: "GTX-A", color: "#9A6292" },
+              ].map(({ label, color }) => (
                 <div
-                  key={n}
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-lg"
-                  style={{ backgroundColor: color }}
+                  key={label}
+                  className="flex items-center justify-center text-white font-black text-sm sm:text-lg"
+                  style={{
+                    backgroundColor: color,
+                    borderRadius: label.match(/^\d+$/) ? "50%" : "4px",
+                    width: label.match(/^\d+$/) ? "40px" : "auto",
+                    height: label.match(/^\d+$/) ? "40px" : "40px",
+                    padding: "0 8px",
+                  }}
                 >
-                  {n}
+                  {label}
                 </div>
               ))}
             </div>
 
-            <div className="text-center max-w-md">
+            <div className="text-center max-w-md px-4">
               <p
-                className="text-3xl sm:text-4xl font-black uppercase tracking-widest mb-3"
+                className="text-2xl sm:text-4xl font-black uppercase tracking-widest mb-2 sm:mb-3"
                 style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.08em" }}
               >
-                출발역 · 도착역 입력
+                경로 검색
               </p>
-              <p className="text-sm leading-relaxed" style={{ color: "#555" }}>
-                실시간 열차 도착정보를 반영해 환승 대기시간을 최소화한 경로를 안내합니다
+              <p className="text-xs sm:text-sm leading-relaxed" style={{ color: "#666" }}>
+                출발역과 도착역을 입력하면 실시간 열차 정보를 반영한 최적 경로를 안내합니다
               </p>
-              <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
-                {[
-                  ["상일동 → 대치", "5호선 → 3호선"],
-                  ["김포공항 → 강남", "5·9호선 급행"],
-                  ["여의도 → 잠실", "5·9·2호선"],
-                  ["홍대입구 → 고속터미널", "2·3·9호선"],
-                ].map(([route, hint]) => (
-                  <div
-                    key={route}
-                    className="border px-3 py-2 text-left"
-                    style={{ borderColor: "#1E1E1E" }}
-                  >
-                    <div className="font-bold" style={{ color: "#888" }}>{route}</div>
-                    <div style={{ color: "#444" }}>{hint}</div>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         )}
