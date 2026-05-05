@@ -41,9 +41,8 @@ export interface ClientRoute {
   label?: string;
 }
 
-// ─── page.tsx 에서 인자 2개를 넘기는 에러를 해결하기 위해 apiKey를 선택적 인자로 추가 ───
+// ─── API 래퍼 함수 ───
 export async function odsaySearchStation(name: string, apiKey?: string) {
-  // 인자로 넘어온 키가 있으면 쓰고, 없으면 환경변수 사용
   return searchStation(name, apiKey || ODSAY_API_KEY);
 }
 
@@ -59,24 +58,46 @@ export async function odsaySearchRoutes(
   return searchRoutes(sx, sy, ex, ey, apiKey || ODSAY_API_KEY);
 }
 
-export function collectTransferPoints(routes: ClientRoute[]): string[] {
+// ─── 헬퍼 함수: page.tsx에서 전달하는 OdsayPath 원본 배열도 처리할 수 있도록 any[] 적용 및 호환 로직 추가 ───
+export function collectTransferPoints(routes: any[]): string[] {
   const points = new Set<string>();
   routes.forEach((route) => {
-    route.segments.forEach((seg, idx) => {
-      if (idx > 0 && seg.trafficType === 1) {
-        points.add(seg.startName);
-      }
-    });
+    // 1. 원본 API 데이터 (OdsayPath) 구조인 경우
+    if (route.subPath) {
+      route.subPath.forEach((seg: any, idx: number) => {
+        if (idx > 0 && seg.trafficType === 1 && seg.startStation?.stationName) {
+          points.add(seg.startStation.stationName);
+        }
+      });
+    } 
+    // 2. 가공된 데이터 (ClientRoute) 구조인 경우
+    else if (route.segments) {
+      route.segments.forEach((seg: any, idx: number) => {
+        if (idx > 0 && seg.trafficType === 1 && seg.startName) {
+          points.add(seg.startName);
+        }
+      });
+    }
   });
   return Array.from(points);
 }
 
-export function collectDepartureStations(routes: ClientRoute[]): string[] {
+export function collectDepartureStations(routes: any[]): string[] {
   const stations = new Set<string>();
   routes.forEach((route) => {
-    const firstSubway = route.segments.find((s) => s.trafficType === 1);
-    if (firstSubway) {
-      stations.add(firstSubway.startName);
+    // 1. 원본 API 데이터 (OdsayPath) 구조인 경우
+    if (route.subPath) {
+      const firstSubway = route.subPath.find((s: any) => s.trafficType === 1);
+      if (firstSubway && firstSubway.startStation?.stationName) {
+        stations.add(firstSubway.startStation.stationName);
+      }
+    } 
+    // 2. 가공된 데이터 (ClientRoute) 구조인 경우
+    else if (route.segments) {
+      const firstSubway = route.segments.find((s: any) => s.trafficType === 1);
+      if (firstSubway && firstSubway.startName) {
+        stations.add(firstSubway.startName);
+      }
     }
   });
   return Array.from(stations);
@@ -209,6 +230,4 @@ export function odsayPathsToClientRoutes(
 
   return labeled;
 }
-
-
 
