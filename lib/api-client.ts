@@ -8,8 +8,7 @@ function normalizeArrival(raw: Record<string, string>): RealtimeArrival {
 
   return {
     stationName: raw.statnNm || "",
-    // subwayId를 훼손하지 않고 원본 그대로 사용 (예: 1075, 1094)
-    line: raw.subwayId || raw.subwayLine || "", 
+    line: raw.subwayId || raw.subwayLine || "", // 1075, 1094 등 원본 유지
     direction: raw.trainLineNm || "",
     arrivalMinutes,
     arrivalMessage: raw.arvlMsg2 || `${arrivalMinutes}분 후`,
@@ -33,16 +32,13 @@ export async function fetchRealtimeArrivals(
     const res = await fetch(url, { cache: "no-store" });
     const data = await res.json();
 
-    if (data.errorMessage && data.errorMessage.status !== 200) {
-      return [];
-    }
+    if (data.errorMessage && data.errorMessage.status !== 200) return [];
 
     const list = data.realtimeArrivalList || [];
     return list.map((raw: Record<string, string>) => normalizeArrival(raw));
   } catch (err) {
-    console.error("서울시 실시간 API 호출 실패:", err);
+    console.error("Seoul API Fetch Error:", err);
     return [];
   }
 }
-
 
