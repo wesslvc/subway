@@ -98,4 +98,4 @@ export function getLineColor(lineCode: number | string): string {
   return map[String(lineCode)] || "#888888";
 }
 
-```
+
