@@ -7,7 +7,11 @@
  *   구조 B: { realtimeStationArrival: { RESULT: { code, message }, row: [...] } }
  */
 
-const REALTIME_BASE = "http://swopenAPI.seoul.go.kr/api/subway";
+// HTTPS 우선, HTTP fallback (Vercel 환경에서 HTTP 차단 가능)
+const REALTIME_BASES = [
+  "https://swopenAPI.seoul.go.kr/api/subway",
+  "http://swopenAPI.seoul.go.kr/api/subway",
+];
 
 export interface RealtimeArrivalItem {
   subwayId: string;  // "1001"~"1009" 등
@@ -26,14 +30,35 @@ function ensureArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val];
 }
 
+async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { cache: "no-store", signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getRealtimeArrivals(
   stationName: string,
   apiKey: string,
 ): Promise<RealtimeArrivalItem[]> {
   // "역" 제거 후 API 호출 (Seoul API DB는 "역" 없는 표기 사용)
   const apiName = stationName.endsWith("역") ? stationName.slice(0, -1) : stationName;
-  const url = `${REALTIME_BASE}/${apiKey}/json/realtimeStationArrival/0/200/${encodeURIComponent(apiName)}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const path = `/${apiKey}/json/realtimeStationArrival/0/200/${encodeURIComponent(apiName)}`;
+
+  let res: Response | undefined;
+  let lastErr: unknown;
+  for (const base of REALTIME_BASES) {
+    try {
+      res = await fetchWithTimeout(base + path);
+      if (res.ok || res.status < 500) break; // 4xx는 API 응답이므로 처리
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!res) throw new Error(`연결 실패: ${lastErr instanceof Error ? lastErr.message : "네트워크 오류"}`);
   if (!res.ok) throw new Error(`HTTP-${res.status}`);
 
   const text = await res.text();

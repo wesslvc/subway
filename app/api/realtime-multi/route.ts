@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRealtimeArrivals } from "@/lib/seoul-api";
 
 export const runtime = "nodejs";
+// Seoul API는 한국 IP에서만 안정적으로 응답 — Vercel ICN1(서울) 리전 우선
+export const preferredRegion = ["icn1", "sin1", "hkg1"];
 
 const REALTIME_KEY = process.env.SEOUL_REALTIME_API_KEY ?? "";
 
