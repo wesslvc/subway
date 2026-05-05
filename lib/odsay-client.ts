@@ -4,36 +4,41 @@ import { ClientRoute, RealtimeArrival } from "@/types/subway";
 import { getLineName, getSubwayId, getLineColor } from "./utils";
 import { searchStation, searchRoutes } from "./odsay-api";
 
-// ─── 누락된 함수 Export (page.tsx 에러 해결용) ────────────────────────────────
-export const odsaySearchStation = searchStation;
-export const odsaySearchRoutes = searchRoutes;
+const ODSAY_API_KEY = process.env.NEXT_PUBLIC_ODSAY_API_KEY || "";
 
-/**
- * 경로 데이터에서 환승역 목록을 수집하는 헬퍼
- */
+// ─── 누락된 함수 복구 (page.tsx 빌드 오류 해결) ──────────────────────────────
+export async function odsaySearchStation(name: string) {
+  return searchStation(name, ODSAY_API_KEY);
+}
+
+export async function odsaySearchRoutes(sx: number, sy: number, ex: number, ey: number) {
+  return searchRoutes(sx, sy, ex, ey, ODSAY_API_KEY);
+}
+
 export function collectTransferPoints(routes: ClientRoute[]): string[] {
   const points = new Set<string>();
-  routes.forEach(route => {
+  routes.forEach((route) => {
     route.segments.forEach((seg, idx) => {
-      if (idx > 0) points.add(seg.startName);
+      if (idx > 0 && seg.trafficType === 1) {
+        points.add(seg.startName);
+      }
     });
   });
   return Array.from(points);
 }
 
-/**
- * 경로 데이터에서 출발역 목록을 수집하는 헬퍼
- */
 export function collectDepartureStations(routes: ClientRoute[]): string[] {
   const stations = new Set<string>();
-  routes.forEach(route => {
-    const firstSubway = route.segments.find(s => s.trafficType === 1);
-    if (firstSubway) stations.add(firstSubway.startName);
+  routes.forEach((route) => {
+    const firstSubway = route.segments.find((s) => s.trafficType === 1);
+    if (firstSubway) {
+      stations.add(firstSubway.startName);
+    }
   });
   return Array.from(stations);
 }
 
-// ─── 기존 로직 통합 ──────────────────────────────────────────────────────────
+// ─── 경로 변환 및 실시간 매칭 ──────────────────────────────────────────────────
 const LINE_HEADWAY: Record<string, [number, number]> = {
   "1": [5, 8], "2": [3, 5], "3": [5, 8], "4": [5, 8], "5": [6, 9],
   "6": [6, 9], "7": [5, 8], "8": [6, 9], "9": [4, 7],
@@ -74,6 +79,7 @@ export function odsayPathsToClientRoutes(
         const startName = s.startStation?.stationName || "";
         const wayName = s.way || "";
 
+        // 실시간 정보 매칭 (SubwayId 일치 여부 확인)
         const matchingArrivals = stationArrivals.filter(
           (a) => 
             a.stationName.includes(startName.replace("역", "")) && 
@@ -125,17 +131,21 @@ export function odsayPathsToClientRoutes(
         segments.push({
           trafficType: 3,
           sectionTime: s.sectionTime || 0,
-          startName: segments.at(-1)?.endName || "출발지",
+          startName: segments.length > 0 ? segments[segments.length - 1].endName : "출발지",
           endName: i < subPaths.length - 1 ? subPaths[i+1].startStation?.stationName : "도착지",
         });
       }
     }
 
+    const subwaySegs = subPaths.filter((s: any) => s.trafficType === 1);
+    const transferCount = Math.max(0, subwaySegs.length - 1);
+    const stationCount = subwaySegs.reduce((sum: number, s: any) => sum + (s.stationCount ?? 0), 0);
+
     return {
       totalMinutes: path.info.totalTime,
       adjustedTotalMinutes: Math.round(cumulativeMin),
-      transferCount: path.info.transferCount,
-      stationCount: path.info.totalStationCount,
+      transferCount,
+      stationCount,
       cost: path.info.payment,
       segments,
       isRealtimeEnhanced,
@@ -143,9 +153,17 @@ export function odsayPathsToClientRoutes(
       departureArrivalMsg,
       departureDirection,
       departureIsTimetable,
-    };
+    } as ClientRoute;
   });
 
-  return routes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes) as ClientRoute[];
+  const labeled = routes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes);
+  if (labeled.length > 0) labeled[0].label = "최단시간";
+  const minT = Math.min(...labeled.map(r => r.transferCount));
+  const minTRoute = labeled.find(r => r.transferCount === minT && !r.label);
+  if (minTRoute) minTRoute.label = "최소환승";
+
+  return labeled;
 }
+
+
 
