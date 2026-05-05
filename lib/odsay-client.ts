@@ -2,14 +2,42 @@
 
 import { ClientRoute, RealtimeArrival } from "@/types/subway";
 import { getLineName, getSubwayId, getLineColor } from "./utils";
+import { searchStation, searchRoutes } from "./odsay-api";
 
-const ODSAY_BASE = "https://api.odsay.com/v1/api";
+// ─── 누락된 함수 Export (page.tsx 에러 해결용) ────────────────────────────────
+export const odsaySearchStation = searchStation;
+export const odsaySearchRoutes = searchRoutes;
 
-// ─── 노선별 배차 간격 (분) ──────────────────────────────────────────────────
+/**
+ * 경로 데이터에서 환승역 목록을 수집하는 헬퍼
+ */
+export function collectTransferPoints(routes: ClientRoute[]): string[] {
+  const points = new Set<string>();
+  routes.forEach(route => {
+    route.segments.forEach((seg, idx) => {
+      if (idx > 0) points.add(seg.startName);
+    });
+  });
+  return Array.from(points);
+}
+
+/**
+ * 경로 데이터에서 출발역 목록을 수집하는 헬퍼
+ */
+export function collectDepartureStations(routes: ClientRoute[]): string[] {
+  const stations = new Set<string>();
+  routes.forEach(route => {
+    const firstSubway = route.segments.find(s => s.trafficType === 1);
+    if (firstSubway) stations.add(firstSubway.startName);
+  });
+  return Array.from(stations);
+}
+
+// ─── 기존 로직 통합 ──────────────────────────────────────────────────────────
 const LINE_HEADWAY: Record<string, [number, number]> = {
   "1": [5, 8], "2": [3, 5], "3": [5, 8], "4": [5, 8], "5": [6, 9],
   "6": [6, 9], "7": [5, 8], "8": [6, 9], "9": [4, 7],
-  "101": [10, 15], "104": [12, 18], "109": [5, 8], "116": [8, 12], "91": [15, 20]
+  "101": [10, 15], "104": [12, 18], "109": [5, 8], "116": [8, 12], "91": [15, 20], "117": [6, 10]
 };
 
 function getAverageWait(lineCode: string): number {
@@ -24,7 +52,7 @@ export function odsayPathsToClientRoutes(
   paths: any[],
   stationArrivals: RealtimeArrival[]
 ): ClientRoute[] {
-  return paths.map((path) => {
+  const routes = paths.map((path) => {
     let cumulativeMin = 0;
     const segments: any[] = [];
     const subPaths = path.subPath || [];
@@ -33,7 +61,6 @@ export function odsayPathsToClientRoutes(
     let departureWaitMinutes: number | undefined;
     let departureArrivalMsg: string | undefined;
     let departureDirection: string | undefined;
-    let departureError: string | undefined;
     let departureIsTimetable = false;
 
     for (let i = 0; i < subPaths.length; i++) {
@@ -47,11 +74,10 @@ export function odsayPathsToClientRoutes(
         const startName = s.startStation?.stationName || "";
         const wayName = s.way || "";
 
-        // 실시간 매칭 로직: 정규화된 subwayId 사용
         const matchingArrivals = stationArrivals.filter(
           (a) => 
             a.stationName.includes(startName.replace("역", "")) && 
-            (a.subwayId === targetSubwayId || a.line === targetSubwayId)
+            String(a.subwayId) === targetSubwayId
         );
 
         let realtimeWaitMin: number | undefined;
@@ -60,9 +86,7 @@ export function odsayPathsToClientRoutes(
         let isTimetable = false;
 
         if (matchingArrivals.length > 0) {
-          let arrival = matchingArrivals.find(a => a.direction.includes(wayName));
-          if (!arrival) arrival = matchingArrivals[0];
-
+          let arrival = matchingArrivals.find(a => a.direction.includes(wayName)) || matchingArrivals[0];
           realtimeWaitMin = arrival.arrivalMinutes;
           realtimeMsg = arrival.arrivalMessage;
           isTimetable = arrival.arrivalMessage.includes(":"); 
@@ -76,7 +100,7 @@ export function odsayPathsToClientRoutes(
           }
         } else {
           realtimeWaitMin = getAverageWait(lineCode);
-          realtimeError = "실시간 정보 없음 (평균)";
+          realtimeError = "실시간 정보 없음";
         }
 
         cumulativeMin += (realtimeWaitMin ?? 0) + s.sectionTime;
@@ -97,18 +121,17 @@ export function odsayPathsToClientRoutes(
           realtimeIsTimetable: isTimetable,
         });
       } else if (s.trafficType === 3) { // Walk
-        const walkMin = s.sectionTime || 0;
-        cumulativeMin += walkMin;
+        cumulativeMin += s.sectionTime || 0;
         segments.push({
           trafficType: 3,
-          sectionTime: walkMin,
-          startName: segments.length > 0 ? segments[segments.length - 1].endName : "출발지",
+          sectionTime: s.sectionTime || 0,
+          startName: segments.at(-1)?.endName || "출발지",
           endName: i < subPaths.length - 1 ? subPaths[i+1].startStation?.stationName : "도착지",
         });
       }
     }
 
-    const route = {
+    return {
       totalMinutes: path.info.totalTime,
       adjustedTotalMinutes: Math.round(cumulativeMin),
       transferCount: path.info.transferCount,
@@ -119,10 +142,10 @@ export function odsayPathsToClientRoutes(
       departureWaitMinutes,
       departureArrivalMsg,
       departureDirection,
-      departureError,
       departureIsTimetable,
-    } as ClientRoute;
+    };
+  });
 
-    return route;
-  }).sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes);
+  return routes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes) as ClientRoute[];
 }
+
