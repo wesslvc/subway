@@ -173,35 +173,49 @@ function matchDirection(bstatnNm: string, way: string | undefined): boolean {
   return n(bstatnNm) === n(way) || n(bstatnNm).includes(n(way)) || n(way).includes(n(bstatnNm));
 }
 
-// 방향 일치 열차 필터
-// 1. way 종착역 일치 열차의 updnLine으로 같은 방향 전체 포함 (단거리 열차 포함)
-// 2. 없으면 passStopList 경유역 종착 열차의 updnLine 사용
-// 3. 그래도 없으면 빈 배열 → 시간표
+// 방향 + 급행 필터
+// ① isExpress면 trainLineNm에 "급행"/"특급" 포함 열차만
+//    반대로 일반이면 급행/특급 열차 제외 (해당 노선에 급행이 존재할 때만)
+// ② way 종착역과 일치하는 열차 우선 (5호선 분기 등 엄격 구분)
+// ③ 없으면 passStopList 경유역 종착 열차 (중간 종착 단거리)
+// ④ 그래도 없으면 빈 배열 → 시간표
 type ArrivalItem = RealtimeArrivals[string]["list"][number];
+
+function isExpressLane(laneName?: string): boolean {
+  return !!(laneName?.includes("급행") || laneName?.includes("특급"));
+}
 
 function getDirectionalTrains(
   lineTrains: ArrivalItem[],
   way: string | undefined,
   passStationNames: string[],
+  express: boolean,
 ): ArrivalItem[] {
-  if (!way) return lineTrains;
-
-  // 1단계: way 종착역과 일치하는 열차로 방향 기준(updnLine) 설정
-  const refTrains = lineTrains.filter(a => matchDirection(a.bstatnNm, way));
-  if (refTrains.length > 0) {
-    const refDir = refTrains[0].updnLine;
-    if (refDir) return lineTrains.filter(a => a.updnLine === refDir);
-    return refTrains;
+  // ① 급행/일반 분리
+  const hasExpress = lineTrains.some(
+    a => a.trainLineNm.includes("급행") || a.trainLineNm.includes("특급")
+  );
+  let pool: ArrivalItem[];
+  if (express) {
+    const ex = lineTrains.filter(a => a.trainLineNm.includes("급행") || a.trainLineNm.includes("특급"));
+    pool = ex.length > 0 ? ex : lineTrains;
+  } else if (hasExpress) {
+    const reg = lineTrains.filter(a => !a.trainLineNm.includes("급행") && !a.trainLineNm.includes("특급"));
+    pool = reg.length > 0 ? reg : lineTrains;
+  } else {
+    pool = lineTrains;
   }
 
-  // 2단계: passStopList 경유역 종착 열차 (중간 종착)
+  if (!way) return pool;
+
+  // ② way 종착역 직접 매칭 (5호선 마천/상일동 등 분기 엄격 구분)
+  const wayMatches = pool.filter(a => matchDirection(a.bstatnNm, way));
+  if (wayMatches.length > 0) return wayMatches;
+
+  // ③ passStopList 경유역 종착 (중간 종착 단거리 열차)
   if (passStationNames.length > 0) {
-    const onPath = lineTrains.filter(a => passStationNames.includes(normStation(a.bstatnNm)));
-    if (onPath.length > 0) {
-      const refDir = onPath[0].updnLine;
-      if (refDir) return lineTrains.filter(a => a.updnLine === refDir);
-      return onPath;
-    }
+    const onPath = pool.filter(a => passStationNames.includes(normStation(a.bstatnNm)));
+    if (onPath.length > 0) return onPath;
   }
 
   return [];
@@ -349,7 +363,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
         if (lineTrains.length === 0) {
           departureError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
         } else {
-          const dirTrains = getDirectionalTrains(lineTrains, depWay, depPassNames);
+          const isExpressDep = isExpressLane(firstSubway.lane?.[0]?.name);
+          const dirTrains = getDirectionalTrains(lineTrains, depWay, depPassNames, isExpressDep);
           const first = dirTrains[0];
           if (first) {
             departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
@@ -435,7 +450,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           if (lineTrains.length === 0) {
             realtimeError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
           } else {
-            const dirTrains = getDirectionalTrains(lineTrains, transferWay, transferPassNames);
+            const isExpressTransfer = isExpressLane(nextSub.lane?.[0]?.name);
+            const dirTrains = getDirectionalTrains(lineTrains, transferWay, transferPassNames, isExpressTransfer);
             const nextTrain = dirTrains
               .filter(a => a.barvlDt >= arrivalAtTransferSec)
               .sort((a, b) => a.barvlDt - b.barvlDt)[0];
