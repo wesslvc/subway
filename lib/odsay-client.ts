@@ -1,12 +1,49 @@
 "use client";
 
-import { ClientRoute, RealtimeArrival } from "@/types/subway";
+import { RealtimeArrival } from "@/types/subway";
 import { getLineName, getSubwayId, getLineColor } from "./utils";
 import { searchStation, searchRoutes } from "./odsay-api";
 
 const ODSAY_API_KEY = process.env.NEXT_PUBLIC_ODSAY_API_KEY || "";
 
-// ─── 누락된 함수 복구 (page.tsx 빌드 오류 해결) ──────────────────────────────
+// ─── page.tsx 에서 요구하는 타입들을 여기서 export 해줍니다 ──────────────────
+export type { RealtimeArrival };
+// page.tsx에서 RealtimeArrivals (복수형)을 찾고 있다면 별칭을 만들어 줍니다.
+export type RealtimeArrivals = RealtimeArrival[];
+
+export interface ClientRouteSegment {
+  trafficType: number;
+  line?: string;
+  lineName?: string;
+  color?: string;
+  startName: string;
+  endName: string;
+  sectionTime: number;
+  stationCount?: number;
+  wayName?: string;
+  realtimeWaitMinutes?: number;
+  realtimeArrivalMsg?: string;
+  realtimeError?: string;
+  realtimeIsTimetable?: boolean;
+}
+
+export interface ClientRoute {
+  totalMinutes: number;
+  adjustedTotalMinutes: number;
+  transferCount: number;
+  stationCount: number;
+  cost: number;
+  segments: ClientRouteSegment[];
+  isRealtimeEnhanced: boolean;
+  departureWaitMinutes?: number;
+  departureArrivalMsg?: string;
+  departureDirection?: string;
+  departureError?: string;
+  departureIsTimetable?: boolean;
+  label?: string;
+}
+
+// ─── page.tsx 에서 호출하는 API 래퍼 함수들 ──────────────────────────────
 export async function odsaySearchStation(name: string) {
   return searchStation(name, ODSAY_API_KEY);
 }
@@ -38,7 +75,7 @@ export function collectDepartureStations(routes: ClientRoute[]): string[] {
   return Array.from(stations);
 }
 
-// ─── 경로 변환 및 실시간 매칭 ──────────────────────────────────────────────────
+// ─── 경로 가공 및 실시간 정보 매칭 로직 ──────────────────────────────────────
 const LINE_HEADWAY: Record<string, [number, number]> = {
   "1": [5, 8], "2": [3, 5], "3": [5, 8], "4": [5, 8], "5": [6, 9],
   "6": [6, 9], "7": [5, 8], "8": [6, 9], "9": [4, 7],
@@ -59,13 +96,14 @@ export function odsayPathsToClientRoutes(
 ): ClientRoute[] {
   const routes = paths.map((path) => {
     let cumulativeMin = 0;
-    const segments: any[] = [];
+    const segments: ClientRouteSegment[] = [];
     const subPaths = path.subPath || [];
 
     let isRealtimeEnhanced = false;
     let departureWaitMinutes: number | undefined;
     let departureArrivalMsg: string | undefined;
     let departureDirection: string | undefined;
+    let departureError: string | undefined;
     let departureIsTimetable = false;
 
     for (let i = 0; i < subPaths.length; i++) {
@@ -79,7 +117,6 @@ export function odsayPathsToClientRoutes(
         const startName = s.startStation?.stationName || "";
         const wayName = s.way || "";
 
-        // 실시간 정보 매칭 (SubwayId 일치 여부 확인)
         const matchingArrivals = stationArrivals.filter(
           (a) => 
             a.stationName.includes(startName.replace("역", "")) && 
@@ -152,8 +189,9 @@ export function odsayPathsToClientRoutes(
       departureWaitMinutes,
       departureArrivalMsg,
       departureDirection,
+      departureError,
       departureIsTimetable,
-    } as ClientRoute;
+    };
   });
 
   const labeled = routes.sort((a, b) => a.adjustedTotalMinutes - b.adjustedTotalMinutes);
@@ -164,6 +202,4 @@ export function odsayPathsToClientRoutes(
 
   return labeled;
 }
-
-
 
