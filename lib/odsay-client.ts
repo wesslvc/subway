@@ -47,7 +47,15 @@ export async function odsaySearchStation(name: string, apiKey?: string) {
   return searchStation(name, apiKey || ODSAY_API_KEY);
 }
 
-export async function odsaySearchRoutes(sx: number, sy: number, ex: number, ey: number, apiKey?: string) {
+export async function odsaySearchRoutes(
+  sx: number, 
+  sy: number, 
+  ex: number, 
+  ey: number, 
+  apiKey?: string,
+  startName?: string,
+  endName?: string
+) {
   return searchRoutes(sx, sy, ex, ey, apiKey || ODSAY_API_KEY);
 }
 
