@@ -1,6 +1,6 @@
 "use client";
 
-import { ClientRoute, ClientSubPath } from "@/lib/odsay-client";
+import { ClientRoute, ClientSubPath, getLineLabel, getLineFullName } from "@/lib/odsay-client";
 import { formatKRW } from "@/lib/utils";
 
 interface RouteCardProps {
@@ -145,20 +145,37 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
 }
 
 function LinePill({ seg }: { seg: ClientSubPath }) {
-  const lineNum = seg.lineCode;
+  const code = seg.lineCode;
+  const isNumbered = code !== undefined && code >= 1 && code <= 9;
+  const label = getLineLabel(code);
+  const fullName = getLineFullName(code, seg.lineName);
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 5,
       backgroundColor: "#1A1A1A", border: "1px solid #2A2A2A", padding: "2px 7px 2px 4px",
     }}>
-      <div style={{
-        width: 16, height: 16, borderRadius: "50%", backgroundColor: seg.lineColor ?? "#888",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: "0.6rem", fontWeight: 900, color: "#fff", flexShrink: 0,
-      }}>
-        {lineNum ?? "?"}
-      </div>
-      <span style={{ fontSize: "0.75rem", fontWeight: 600, color: "#ccc" }}>
+      {isNumbered ? (
+        <div style={{
+          width: 16, height: 16, borderRadius: "50%", backgroundColor: seg.lineColor ?? "#888",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "0.6rem", fontWeight: 900, color: "#fff", flexShrink: 0,
+        }}>
+          {label}
+        </div>
+      ) : (
+        <div style={{
+          height: 16, borderRadius: 3, backgroundColor: seg.lineColor ?? "#888",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "0 4px", fontSize: "0.55rem", fontWeight: 900, color: "#fff",
+          flexShrink: 0, whiteSpace: "nowrap",
+        }}>
+          {label}
+        </div>
+      )}
+      <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#aaa" }}>
+        {fullName}
+      </span>
+      <span style={{ fontSize: "0.7rem", fontWeight: 400, color: "#666" }}>
         {seg.stationCount}개역
       </span>
     </div>

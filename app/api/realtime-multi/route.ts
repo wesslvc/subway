@@ -9,8 +9,9 @@ type ArrivalEntry = {
   subwayId: string;
   barvlDt: number;
   msg: string;
-  bstatnNm: string;    // 종착역명 (방향 매칭용)
-  trainLineNm: string; // "방화행 - 신금호방면" (행선지 표시용)
+  bstatnNm: string;
+  trainLineNm: string;
+  updnLine: string;  // 상행/하행/내선/외선
 };
 type StationResult = { list: ArrivalEntry[]; error?: string };
 
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
               msg: a.arvlMsg2,
               bstatnNm: a.bstatnNm,
               trainLineNm: a.trainLineNm,
+              updnLine: a.updnLine,
             }))
             .filter((a) => !isNaN(a.barvlDt) && a.barvlDt >= 0),
         };

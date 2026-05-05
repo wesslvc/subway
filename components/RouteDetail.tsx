@@ -1,6 +1,6 @@
 "use client";
 
-import { ClientRoute, ClientSubPath } from "@/lib/odsay-client";
+import { ClientRoute, ClientSubPath, getLineLabel, getLineFullName } from "@/lib/odsay-client";
 import { formatMinutes, formatKRW } from "@/lib/utils";
 
 interface RouteDetailProps {
@@ -375,35 +375,38 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
 
 function LineTag({ seg }: { seg: ClientSubPath }) {
   if (!seg.lineColor || !seg.lineCode) return null;
+  const code = seg.lineCode;
+  const isNumbered = code >= 1 && code <= 9;
+  const label = getLineLabel(code);
+  const fullName = getLineFullName(code, seg.lineName);
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "1px 7px 1px 4px",
-        backgroundColor: seg.lineColor + "22",
-        border: `1px solid ${seg.lineColor}66`,
-      }}
-    >
-      <div
-        style={{
-          width: 14,
-          height: 14,
-          borderRadius: "50%",
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: "1px 7px 1px 4px",
+      backgroundColor: seg.lineColor + "22",
+      border: `1px solid ${seg.lineColor}66`,
+    }}>
+      {isNumbered ? (
+        <div style={{
+          width: 14, height: 14, borderRadius: "50%",
           backgroundColor: seg.lineColor,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "0.55rem",
-          fontWeight: 900,
-          color: "#fff",
-        }}
-      >
-        {seg.lineCode}
-      </div>
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "0.55rem", fontWeight: 900, color: "#fff",
+        }}>
+          {label}
+        </div>
+      ) : (
+        <div style={{
+          height: 14, borderRadius: 2, backgroundColor: seg.lineColor,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "0 3px", fontSize: "0.5rem", fontWeight: 900, color: "#fff",
+          whiteSpace: "nowrap",
+        }}>
+          {label}
+        </div>
+      )}
       <span style={{ fontSize: "0.7rem", fontWeight: 700, color: seg.lineColor }}>
-        {seg.lineCode}호선
+        {fullName}
       </span>
     </div>
   );
