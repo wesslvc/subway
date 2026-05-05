@@ -1,4 +1,3 @@
-
 "use client";
 
 import { ClientRoute, RealtimeArrival } from "@/types/subway";
