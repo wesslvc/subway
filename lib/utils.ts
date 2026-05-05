@@ -18,7 +18,7 @@ export function formatKRW(amount: number): string {
 
 /**
  * ODsay 노선 코드(subwayCode) -> 서울시 실시간 API subwayId 매핑
- * 사용자 피드백 반영: 116(수인분당), 109(신분당), 114(서해선), 91(GTX-A), 112(경강선), 21(인천1호선) 등
+ * 사용자 피드백 최종 반영
  */
 const SUBWAY_ID_MAP: Record<string, string> = {
   "1": "1001", "2": "1002", "3": "1003", "4": "1004",
@@ -34,12 +34,9 @@ const SUBWAY_ID_MAP: Record<string, string> = {
   "113": "1092", // 우이신설선
   "114": "1093", // 서해선
   "116": "1075", // 수인분당선
-  "118": "1094", // 신림선
+  "117": "1094", // 신림선
 };
 
-/**
- * ODsay 노선 코드 -> 실제 노선 명칭 매핑
- */
 const LINE_NAME_MAP: Record<string, string> = {
   "21": "인천1호선",
   "22": "인천2호선",
@@ -52,49 +49,29 @@ const LINE_NAME_MAP: Record<string, string> = {
   "113": "우이신설선",
   "114": "서해선",
   "116": "수인분당선",
-  "118": "신림선",
+  "117": "신림선",
 };
 
-/**
- * ODsay 코드를 서울시 API용 subwayId로 변환
- */
 export function getSubwayId(lineCode: string | number): string {
   const code = String(lineCode);
-  if (SUBWAY_ID_MAP[code]) return SUBWAY_ID_MAP[code];
-  const num = parseInt(code);
-  if (num < 10) return `100${num}`;
-  return code;
+  return SUBWAY_ID_MAP[code] || (parseInt(code) < 10 ? `100${code}` : code);
 }
 
-/**
- * 노선 코드를 실제 한글 명칭으로 변환
- */
 export function getLineName(lineCode: string | number): string {
   const code = String(lineCode);
   if (LINE_NAME_MAP[code]) return LINE_NAME_MAP[code];
   const num = parseInt(code);
-  return num < 10 ? `${num}호선` : `${code}호선`;
+  return num > 0 && num < 10 ? `${num}호선` : `${code}호선`;
 }
 
-/** 노선별 고유 색상 반환 */
 export function getLineColor(lineCode: number | string): string {
   const map: Record<string, string> = {
     "1": "#0052A4", "2": "#00A84D", "3": "#EF7C1C", "4": "#00A5DE",
     "5": "#996CAC", "6": "#CD7C2F", "7": "#747F00", "8": "#E6186C", "9": "#BDB092",
-    "21": "#7CA8D5", // 인천1
-    "22": "#ED8B00", // 인천2
-    "91": "#9A62A6", // GTX-A
-    "101": "#0090D2", // 공항
-    "104": "#77C4A3", // 경의중앙
-    "107": "#0C8E72", // 경춘
-    "109": "#D4003B", // 신분당
-    "112": "#0054A6", // 경강
-    "113": "#B0CE18", // 우이신설
-    "114": "#81A914", // 서해
-    "116": "#FABE00", // 수인분당
-    "118": "#6789CA", // 신림
+    "21": "#7CA8D5", "22": "#ED8B00", "91": "#9A62A6", "101": "#0090D2",
+    "104": "#77C4A3", "107": "#0C8E72", "109": "#D4003B", "112": "#0054A6",
+    "113": "#B0CE18", "114": "#81A914", "116": "#FABE00", "117": "#6789CA",
   };
   return map[String(lineCode)] || "#888888";
 }
-
 
