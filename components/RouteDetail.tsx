@@ -252,8 +252,10 @@ function SubwaySegment({ seg, isLast }: { seg: ClientSubPath; isLast: boolean })
               letterSpacing: "0.05em",
             }}
           >
-            {seg.direction && (
-              <span style={{ color: "#888" }}>{seg.direction}행 · </span>
+            {(seg.realtimeDirection ?? seg.direction) && (
+              <span style={{ color: seg.realtimeDirection ? "#93C5FD" : "#888" }}>
+                {seg.realtimeDirection ?? `${seg.direction}행`} ·{" "}
+              </span>
             )}
             {seg.stationCount != null ? `${seg.stationCount}개역 · ` : ""}
             {seg.sectionTime}분
@@ -346,6 +348,7 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
               display: "flex",
               alignItems: "center",
               gap: 5,
+              flexWrap: "wrap",
             }}
           >
             <span
@@ -356,11 +359,17 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
                 backgroundColor: "#22C55E",
                 display: "inline-block",
                 animation: "blink 1.8s ease-in-out infinite",
+                flexShrink: 0,
               }}
             />
             {seg.realtimeWaitMinutes === 0
               ? "도착 시 바로 탑승 가능"
               : `대기 ${seg.realtimeWaitMinutes}분`}
+            {seg.realtimeDirection && (
+              <span style={{ color: "#93C5FD", fontWeight: 900 }}>
+                {seg.realtimeDirection}
+              </span>
+            )}
             {seg.realtimeArrivalMsg && (
               <span style={{ color: "#16A34A", fontSize: "0.7rem" }}>
                 ({seg.realtimeArrivalMsg})

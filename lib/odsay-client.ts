@@ -250,25 +250,14 @@ function getDirectionalTrains(
     }
   }
 
-  return [];
-}
-
-// 2호선 내선순환/외선순환 + 다음역 표시
-function formatLine2Direction(trainLineNm: string, nextStationName?: string): string {
-  const isOuter = trainLineNm.includes("외선");
-  const isInner = trainLineNm.includes("내선");
-  if (!isOuter && !isInner) return trainLineNm.split(" - ")[0] ?? trainLineNm;
-  const dir = isOuter ? "외선순환" : "내선순환";
-  const next = nextStationName ? normStation(nextStationName) : "";
-  return next ? `${dir}(다음역: ${next})` : dir;
+  // ④ 방향 판별 실패 → pool 전체 반환 (최소한 라인 열차는 보여줌)
+  //    환승 종점역(오금 등)은 어차피 모든 열차가 같은 방향이므로 무해
+  return pool;
 }
 
 // 1·9호선 특급/급행/일반 표시
-//   1호선: 특급, 급행, 일반
-//   9호선: 급행, 일반
 function formatExpressDirection(trainLineNm: string): string {
   const base = (trainLineNm.split(" - ")[0] ?? trainLineNm).trim();
-  // 이미 prefix 있으면 그대로
   if (/^(특급|급행)\s/.test(base)) return base;
   if (trainLineNm.includes("특급")) return `특급 ${base}`;
   if (trainLineNm.includes("급행")) return `급행 ${base}`;
@@ -276,14 +265,28 @@ function formatExpressDirection(trainLineNm: string): string {
 }
 
 // 노선별 방향 표시 디스패처
+// updnLine: Seoul API의 "내선"/"외선"/"상행"/"하행" 값 — 2호선 방향 판별에 사용
 function formatDirectionByLine(
   lineCode: number,
   trainLineNm: string,
+  updnLine: string,
   nextStationName?: string,
 ): string {
-  if (lineCode === 2) return formatLine2Direction(trainLineNm, nextStationName);
+  const next = nextStationName ? normStation(nextStationName) : "";
+
+  // 2호선: updnLine 또는 trainLineNm에서 내선/외선 감지
+  if (lineCode === 2) {
+    const isOuter = updnLine.includes("외선") || trainLineNm.includes("외선");
+    const isInner = updnLine.includes("내선") || trainLineNm.includes("내선");
+    if (isOuter) return next ? `외선순환(다음역: ${next})` : "외선순환";
+    if (isInner) return next ? `내선순환(다음역: ${next})` : "내선순환";
+    // 성수지선 등 내/외선 명시 없을 때: terminus + 다음역
+    const terminus = trainLineNm.split(" - ")[0]?.trim() ?? trainLineNm;
+    return next ? `${terminus}(다음역: ${next})` : terminus;
+  }
+
   if (lineCode === 1 || lineCode === 9) return formatExpressDirection(trainLineNm);
-  return trainLineNm.split(" - ")[0] ?? trainLineNm;
+  return (trainLineNm.split(" - ")[0] ?? trainLineNm).trim();
 }
 
 // ─── ODsay API 호출 ───────────────────────────────────────────────────────────
@@ -419,7 +422,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             departureWaitMinutes = Math.ceil(Math.max(0, first.barvlDt) / 60);
             departureArrivalMsg = first.msg;
             const nextSt = firstSubway.passStopList?.stations[1]?.stationName;
-            departureDirection = formatDirectionByLine(depCode, first.trainLineNm ?? "", nextSt);
+            departureDirection = formatDirectionByLine(depCode, first.trainLineNm ?? "", first.updnLine ?? "", nextSt);
             isRealtimeEnhanced = true;
           } else {
             departureError = "해당 방향 대기 중";
@@ -434,6 +437,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
     }
 
     let cumulativeMin = departureWaitMinutes ?? 0;
+    // 직전 실시간 매칭에서 얻은 방향 — 다음 subway segment에 전달
+    let pendingRealtimeDirection: string | undefined = departureDirection;
 
     // ── 2. 구간별 처리 ────────────────────────────────────────────────────────
     for (let i = 0; i < subPaths.length; i++) {
@@ -442,6 +447,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
       if (sp.trafficType === 1) {
         const lane = sp.lane?.[0];
         const code = lane?.subwayCode ?? 0;
+        const segRtDir = pendingRealtimeDirection;
+        pendingRealtimeDirection = undefined;  // 소비
         segments.push({
           trafficType: 1,
           sectionTime: sp.sectionTime,
@@ -452,6 +459,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           lineCode: code,
           lineColor: LINE_COLORS[code] ?? "#888",
           direction: sp.way,
+          realtimeDirection: segRtDir,  // 실시간 매칭 방향 (RouteDetail에서 사용)
           stations: sp.passStopList?.stations.map(s => ({
             index: s.index, name: s.stationName, id: String(s.stationID),
           })),
@@ -506,7 +514,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
               if (nextTrain) {
                 realtimeWaitMin = Math.max(0, Math.ceil((nextTrain.barvlDt - arrivalAtTransferSec) / 60));
                 realtimeMsg = nextTrain.msg;
-                realtimeDirection = formatDirectionByLine(lineCode, nextTrain.trainLineNm ?? "", transferNextStation);
+                realtimeDirection = formatDirectionByLine(lineCode, nextTrain.trainLineNm ?? "", nextTrain.updnLine ?? "", transferNextStation);
                 isRealtimeEnhanced = true;
               } else {
                 // 도착 시점이 실시간 데이터 범위를 넘음 → 마지막 관측 열차 + 배차간격으로 외삽
@@ -516,7 +524,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
                 while (projected < arrivalAtTransferSec) projected += headwaySec;
                 realtimeWaitMin = Math.max(0, Math.ceil((projected - arrivalAtTransferSec) / 60));
                 realtimeMsg = `최근 관측 ${Math.round(last.barvlDt / 60)}분 후 + 배차 외삽`;
-                realtimeDirection = formatDirectionByLine(lineCode, last.trainLineNm ?? "", transferNextStation);
+                realtimeDirection = formatDirectionByLine(lineCode, last.trainLineNm ?? "", last.updnLine ?? "", transferNextStation);
                 realtimeIsTimetable = true;
                 isRealtimeEnhanced = true;
               }
@@ -530,6 +538,9 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
         }
 
         cumulativeMin += walkMin + (realtimeWaitMin ?? 0);
+
+        // 다음 subway segment에 방향 전달
+        pendingRealtimeDirection = realtimeDirection;
 
         segments.push({
           trafficType: 3,
