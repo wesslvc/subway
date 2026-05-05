@@ -96,14 +96,13 @@ export default function SearchForm({ onSearch, isLoading }: SearchFormProps) {
             onClick={handleSwap}
             disabled={isLoading}
             title="출발/도착 바꾸기"
-            className="hidden sm:block"
             style={{
               backgroundColor: "#1A1A1A",
               border: "1px solid #2A2A2A",
               color: "#888",
               padding: "10px 12px",
               cursor: "pointer",
-              fontSize: "1rem",
+              fontSize: "0.95rem",
               transition: "all 0.15s",
               flexShrink: 0,
             }}
