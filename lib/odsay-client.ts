@@ -268,21 +268,24 @@ function getDirectionalTrains(
 
   const validSet = new Set([endNorm, wayNorm].filter(Boolean));
 
-  // ② bstatnNm 기반 매칭 — 분기 노선 구분 (filteredPool 사용, 중간기착 이미 제거됨)
+  // ② bstatnNm 기반 매칭 — 행선지(분기 노선) 엄격 구분 (filteredPool 사용)
   //    validSet = {구간 목표역, way 종착역}
-  //    마천行 ✓  하남검단산行 ✓(경로가 마천인 경우 hint에서 걸러짐)  강동行 ✗
+  //    마천行 ✓  하남검단산行 ✓  강동行(중간기착) ✗  왕십리行(중간기착) ✗
   if (validSet.size > 0) {
     const bstatnMatch = filteredPool.filter(a => {
       const b = normForMatch(a.bstatnNm);
       return [...validSet].some(v => b === v || b.includes(v) || v.includes(b));
     });
     if (bstatnMatch.length > 0) return bstatnMatch;
+
+    // bstatnNm이 validSet에 없음 → 다른 분기·반대방향 열차
+    // passNorm에 없는 종착행(통과행 후보)도 반대방향 열차와 구분이 불가능하므로 시간표 fallback
+    return [];
   }
 
-  // ③ trainLineNm "방면" 힌트 매칭 (filteredPool 사용)
-  //    bstatnNm 매칭 실패 시에만 사용. 중간기착행은 이미 filteredPool에서 없음.
-  //    "마천행 - 둔촌동방면" + passNorm에 "둔촌동" → 매칭 ✓
-  //    "하남검단산행 - 암사방면" + passNorm(마천branch)에 "암사" 없음 → 제외 ✓
+  // ③ 방향 정보 전혀 없을 때만 hint 매칭 (validSet이 있으면 사용 안 함)
+  //    hint 매칭은 공유 경유역(강동, 영등포 등)으로 다른 분기 열차도 포함시킴
+  //    → 1호선(인천/천안), 5호선(마천/하남) 등 분기 노선에서 오탐 발생 → 금지
   if (passNorm.length > 0) {
     const hintMatch = filteredPool.filter(a => {
       const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
@@ -294,9 +297,8 @@ function getDirectionalTrains(
     if (hintMatch.length > 0) return hintMatch;
   }
 
-  // ④ 방향 정보 없음 → pool 전체 (단방향 종점역 등 예외용 마지막 보험)
-  if (!wayNorm && passNorm.length === 0) return pool;
-  return [];
+  // ④ 정보 부재 최후 fallback
+  return pool;
 }
 
 // 1·9호선 특급/급행/일반 표시
@@ -494,9 +496,8 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
               departureArrivalMsg = msgFirst.msg;
               departureDirection = formatDirectionByLine(depCode, msgFirst.trainLineNm ?? "", msgFirst.updnLine ?? "", nextSt);
               isRealtimeEnhanced = true;  // 실시간 기반 추정
-            } else {
-              departureError = "ETA 미계산";
             }
+            // estimated === null → 시간표 fallback (에러 메시지 없이 조용히)
           } else {
             departureError = "해당 방향 대기 중";
           }
