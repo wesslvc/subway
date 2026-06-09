@@ -84,26 +84,23 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
           {/* 출발역 대기 */}
           {route.departureError === "운행종료" ? (
             <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#F59E0B", letterSpacing: "0.05em" }}>
-              ⚑ 운행종료
+              ⚑ 운행종료 — 막차가 끊겼습니다
             </div>
           ) : route.departureWaitMinutes != null ? (
             <div style={{ fontSize: "0.68rem", fontWeight: 700, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ color: "#555" }}>{subwaySegs[0]?.startName} 출발 ·</span>
               {route.departureIsTimetable ? (
                 <>
-                  <span style={{ color: "#666" }}>시간표</span>
+                  <span style={{ color: "#666" }}>배차 추정</span>
                   <span style={{ color: "#888" }}>~{route.departureWaitMinutes}분 대기</span>
-                  {route.departureError && (
-                    <span style={{ color: "#555", fontWeight: 500 }}>({route.departureError})</span>
-                  )}
                 </>
               ) : (
                 <>
-                  <span style={{ color: "#22C55E" }}>첫 열차</span>
                   {route.departureDirection && (
                     <span style={{ color: "#16A34A", fontWeight: 800 }}>{route.departureDirection}</span>
                   )}
                   <span style={{ color: "#22C55E" }}>
-                    {route.departureWaitMinutes === 0 ? "곧 출발" : `${route.departureWaitMinutes}분 후`}
+                    {route.departureWaitMinutes === 0 ? "곧 도착" : `${route.departureWaitMinutes}분 후 도착`}
                   </span>
                   {route.departureArrivalMsg && (
                     <span style={{ color: "#555" }}>({route.departureArrivalMsg})</span>
@@ -124,11 +121,8 @@ export default function RouteCard({ route, isSelected, onClick }: RouteCardProps
                 <span style={{ color: "#F59E0B", fontWeight: 800 }}>⚑ 운행종료</span>
               ) : s.realtimeIsTimetable ? (
                 <>
-                  <span style={{ color: "#666" }}>시간표</span>
+                  <span style={{ color: "#666" }}>배차 추정</span>
                   <span style={{ color: "#888" }}>~{s.realtimeWaitMinutes}분 대기</span>
-                  {s.realtimeError && (
-                    <span style={{ color: "#444", fontWeight: 500 }}>({s.realtimeError})</span>
-                  )}
                 </>
               ) : s.realtimeError ? (
                 <span style={{ color: "#EF4444" }}>오류 ({s.realtimeError})</span>

@@ -141,12 +141,7 @@ export default function RouteDetail({ route, fromName, toName }: RouteDetailProp
             }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#555", display: "inline-block", flexShrink: 0 }} />
               <div style={{ fontSize: "0.8rem", color: "#888", fontWeight: 700 }}>
-                시간표 기준 ~{route.departureWaitMinutes}분 후 탑승
-                {route.departureError && (
-                  <span style={{ marginLeft: 8, color: "#555", fontWeight: 500, fontSize: "0.7rem" }}>
-                    (실시간 오류: {route.departureError})
-                  </span>
-                )}
+                배차 간격 기준 ~{route.departureWaitMinutes}분 후 탑승
               </div>
             </div>
           ) : (
@@ -329,10 +324,7 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
         ) : seg.realtimeIsTimetable ? (
           <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#666", marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: "#555", display: "inline-block" }} />
-            시간표 기준 ~{seg.realtimeWaitMinutes}분 대기
-            {seg.realtimeError && (
-              <span style={{ color: "#444", fontWeight: 500, fontSize: "0.7rem" }}>(실시간 오류: {seg.realtimeError})</span>
-            )}
+            배차 간격 기준 ~{seg.realtimeWaitMinutes}분 대기
           </div>
         ) : seg.realtimeError ? (
           <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#EF4444", marginTop: 3 }}>

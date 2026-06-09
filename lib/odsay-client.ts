@@ -161,6 +161,7 @@ interface OdsaySubPath {
   endStation?: { stationID: number; stationName: string };
   passStopList?: { stations: { index: number; stationID: number; stationName: string }[] };
   way?: string;
+  wayCode?: number;  // 1=상행, 2=하행 (ODsay) — Seoul API updnLine 대조용
 }
 
 interface OdsayPath {
@@ -224,12 +225,21 @@ function estimateMinutesFromMsg(msg: string): number | null {
   return null;
 }
 
+// trainLineNm "○○행 - ××방면"에서 방면 힌트 추출 (없으면 "")
+function extractHint(trainLineNm: string): string {
+  const tnm = (trainLineNm ?? "").replace(/\s/g, "");
+  const dashIdx = tnm.indexOf("-");
+  if (dashIdx < 0) return "";
+  return normForMatch(tnm.slice(dashIdx + 1).replace(/방면$/, ""));
+}
+
 function getDirectionalTrains(
   lineTrains: ArrivalItem[],
   passStationNames: string[],  // ODsay passStopList[1:] 후속역 배열
   way: string | undefined,     // ODsay way — 해당 방향 종착역 (분기 노선 구분 기준)
   express: boolean,
   endStationName?: string,     // 이 구간의 실제 하차역 — 중간기착행 제외용
+  wayCode?: number,            // ODsay 1=상행 2=하행 — updnLine 대조용
 ): ArrivalItem[] {
   // ① 급행/일반 분리
   const hasExpress = lineTrains.some(
@@ -250,14 +260,9 @@ function getDirectionalTrains(
   const wayNorm = way ? normForMatch(way) : "";
   const endNorm = endStationName ? normForMatch(endStationName) : (passNorm.at(-1) ?? "");
 
-  // ── 중간기착 사전 제외 ────────────────────────────────────────────────────────
-  // passStopList에 들어있는 역(= 이 구간의 경유역들)이면서 endpoint가 아닌 역을 종착으로
-  // 하는 열차는 "중간기착행"으로 판정해 pool에서 먼저 제거한다.
-  // 이 필터를 bstatnNm 매칭과 hint 매칭 양쪽에 적용해야
-  // "강동行 trainLineNm에 강동방면 힌트가 있어 hint 매칭으로 포함되던" 버그도 막힌다.
-  //
-  // passStopList에 없는 역(구간 너머 종착, e.g. way)은 통과행이므로 허용.
-  //   강동→마천 구간: pool에서 둔촌동行(중간기착) 제거, 마천行·방화行(통과) 유지
+  // ② 중간기착 제외 — 경유역(endpoint 제외)을 종착으로 하는 열차는 목적지 전에 끊김
+  //    상일동→하남검단산 가는데 강동行/길동行 → 제외
+  //    passStopList에 없는 역 종착(방화行 등 구간 너머 통과행)은 유지
   const passNormSet = new Set(passNorm);
   const filteredPool = (endNorm && passNorm.length > 0)
     ? pool.filter(a => {
@@ -266,39 +271,51 @@ function getDirectionalTrains(
       })
     : pool;
 
-  const validSet = new Set([endNorm, wayNorm].filter(Boolean));
-
-  // ② bstatnNm 기반 매칭 — 행선지(분기 노선) 엄격 구분 (filteredPool 사용)
+  // ③ 행선지(bstatnNm) 정확 매칭 — 분기 노선에서 가장 신뢰도 높음
   //    validSet = {구간 목표역, way 종착역}
-  //    마천行 ✓  하남검단산行 ✓  강동行(중간기착) ✗  왕십리行(중간기착) ✗
+  //    강동→마천: 마천行 ✓ / 하남검단산行 ✗ / 강동行(중간기착) ✗
+  //    상일동→명일: 명일行 ✓ (드물지만 존재 시 최우선)
+  const validSet = new Set([endNorm, wayNorm].filter(Boolean));
   if (validSet.size > 0) {
     const bstatnMatch = filteredPool.filter(a => {
       const b = normForMatch(a.bstatnNm);
       return [...validSet].some(v => b === v || b.includes(v) || v.includes(b));
     });
     if (bstatnMatch.length > 0) return bstatnMatch;
-
-    // bstatnNm이 validSet에 없음 → 다른 분기·반대방향 열차
-    // passNorm에 없는 종착행(통과행 후보)도 반대방향 열차와 구분이 불가능하므로 시간표 fallback
-    return [];
   }
 
-  // ③ 방향 정보 전혀 없을 때만 hint 매칭 (validSet이 있으면 사용 안 함)
-  //    hint 매칭은 공유 경유역(강동, 영등포 등)으로 다른 분기 열차도 포함시킴
-  //    → 1호선(인천/천안), 5호선(마천/하남) 등 분기 노선에서 오탐 발생 → 금지
+  // ④ 방향(updnLine) 매칭 — 본선 통과행 포착 (행선지 매칭 실패 시)
+  //    상일동→명일: 방화行·김포공항行은 명일行이 아니지만 모두 명일을 통과 → 유효
+  //    ODsay wayCode(1=상행,2=하행)와 Seoul API updnLine 대조.
+  //    단, "방면" 힌트가 있는데 경로상 후속역이 아니면 다른 분기로 가는 열차 → 제외
+  //      강동→하남검단산인데 "마천행 - 둔촌동방면": 둔촌동 ∉ passNorm → 제외 ✓
+  //      상일동→명일인데 "방화행 - 강동방면": 강동 ∈ passNorm → 포함 ✓
+  const dirStr = wayCode === 1 ? "상행" : wayCode === 2 ? "하행" : "";
+  if (dirStr) {
+    const dirMatch = filteredPool.filter(a => {
+      if (!(a.updnLine ?? "").includes(dirStr)) return false;
+      const hint = extractHint(a.trainLineNm);
+      if (hint && passNorm.length > 0) {
+        return passNorm.some(n => hint.includes(n) || n.includes(hint));
+      }
+      return true;  // 힌트 없으면 방향 일치만으로 수용
+    });
+    if (dirMatch.length > 0) return dirMatch;
+  }
+
+  // ⑤ 방면 힌트 매칭 — wayCode 없는 노선(2호선 내/외선 등) fallback
   if (passNorm.length > 0) {
     const hintMatch = filteredPool.filter(a => {
-      const tnm = (a.trainLineNm ?? "").replace(/\s/g, "");
-      const dashIdx = tnm.indexOf("-");
-      if (dashIdx < 0) return false;
-      const hintPart = normForMatch(tnm.slice(dashIdx + 1));
-      return passNorm.some(n => hintPart.includes(n));
+      const hint = extractHint(a.trainLineNm);
+      return hint !== "" && passNorm.some(n => hint.includes(n) || n.includes(hint));
     });
     if (hintMatch.length > 0) return hintMatch;
   }
 
-  // ④ 정보 부재 최후 fallback
-  return pool;
+  // ⑥ 방향 정보가 있었는데 매칭 실패 → 해당 방향 열차 없음 (시간표 fallback)
+  //    방향 정보가 전혀 없으면 pool 전체 (단방향 종점역 등)
+  if (!wayNorm && passNorm.length === 0 && !dirStr) return pool;
+  return [];
 }
 
 // 1·9호선 특급/급행/일반 표시
@@ -475,7 +492,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
           departureError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
         } else {
           const isExpressDep = isExpressLane(firstSubway.lane?.[0]?.name);
-          const dirTrains = getDirectionalTrains(lineTrains, depPassNames, depWay, isExpressDep, depEndName);
+          const dirTrains = getDirectionalTrains(lineTrains, depPassNames, depWay, isExpressDep, depEndName, firstSubway.wayCode);
           // 탑승 가능 + ETA 신뢰 가능 열차 우선 선택
           // barvlDt=0 이면서 진입(arvlCd=0) 아닌 열차는 ETA 불명확 → 건너뜀
           const boardable = dirTrains.filter(isBoardable);
@@ -577,7 +594,7 @@ export function odsayPathsToClientRoutes(paths: OdsayPath[], arrivals: RealtimeA
             realtimeError = allLineTrains.length > 0 ? "운행종료" : "데이터 없음";
           } else {
             const isExpressTransfer = isExpressLane(nextSub.lane?.[0]?.name);
-            const dirTrains = getDirectionalTrains(lineTrains, transferPassNames, transferWay, isExpressTransfer, transferEndName);
+            const dirTrains = getDirectionalTrains(lineTrains, transferPassNames, transferWay, isExpressTransfer, transferEndName, nextSub.wayCode);
 
             if (dirTrains.length === 0) {
               realtimeError = "해당 방향 대기 중";
