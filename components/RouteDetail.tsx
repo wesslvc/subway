@@ -322,13 +322,12 @@ function WalkSegment({ seg }: { seg: ClientSubPath }) {
             ⚑ 운행종료
           </div>
         ) : seg.realtimeIsTimetable ? (
-          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#666", marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: "#555", display: "inline-block" }} />
-            배차 간격 기준 ~{seg.realtimeWaitMinutes}분 대기
-          </div>
-        ) : seg.realtimeError ? (
-          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#EF4444", marginTop: 3 }}>
-            실시간 수집 오류 ({seg.realtimeError})
+          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#666", marginTop: 3, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: "#555", display: "inline-block", flexShrink: 0 }} />
+            <span>배차 간격 기준 ~{seg.realtimeWaitMinutes}분 대기</span>
+            {seg.realtimeDirection && (
+              <span style={{ color: "#555", fontWeight: 700 }}>{seg.realtimeDirection}</span>
+            )}
           </div>
         ) : seg.realtimeWaitMinutes != null ? (
           <div

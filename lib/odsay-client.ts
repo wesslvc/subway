@@ -259,11 +259,12 @@ function getDirectionalTrains(
   const passNorm = passStationNames.map(normForMatch).filter(Boolean);
   const wayNorm = way ? normForMatch(way) : "";
   const endNorm = endStationName ? normForMatch(endStationName) : (passNorm.at(-1) ?? "");
-
-  // ② 중간기착 제외 — 경유역(endpoint 제외)을 종착으로 하는 열차는 목적지 전에 끊김
-  //    상일동→하남검단산 가는데 강동行/길동行 → 제외
-  //    passStopList에 없는 역 종착(방화行 등 구간 너머 통과행)은 유지
   const passNormSet = new Set(passNorm);
+  const dirStr = wayCode === 1 ? "상행" : wayCode === 2 ? "하행" : "";
+
+  // ② 중간기착 제외 — passNorm 중간역(endNorm 제외)을 종착으로 하는 열차 제외
+  //    강동→하남검단산: 길동行/고덕行 등 중간에 끊기는 열차 제거
+  //    passNorm에 없는 역 종착(방화行 등 구간 너머 통과행)은 유지
   const filteredPool = (endNorm && passNorm.length > 0)
     ? pool.filter(a => {
         const b = normForMatch(a.bstatnNm);
@@ -271,39 +272,71 @@ function getDirectionalTrains(
       })
     : pool;
 
-  // ③ 행선지(bstatnNm) 정확 매칭 — 분기 노선에서 가장 신뢰도 높음
-  //    validSet = {구간 목표역, way 종착역}
-  //    강동→마천: 마천行 ✓ / 하남검단산行 ✗ / 강동行(중간기착) ✗
-  //    상일동→명일: 명일行 ✓ (드물지만 존재 시 최우선)
   const validSet = new Set([endNorm, wayNorm].filter(Boolean));
+
+  // ③ 행선지(bstatnNm) 정확 매칭 — 분기 노선 구분 최우선
+  //    validSet = {구간 목표역, way 종착역}
+  const bstatnMatch = validSet.size > 0
+    ? filteredPool.filter(a => {
+        const b = normForMatch(a.bstatnNm);
+        return [...validSet].some(v => b === v || b.includes(v) || v.includes(b));
+      })
+    : [];
+  if (bstatnMatch.length > 0) return bstatnMatch;
+
   if (validSet.size > 0) {
-    const bstatnMatch = filteredPool.filter(a => {
-      const b = normForMatch(a.bstatnNm);
-      return [...validSet].some(v => b === v || b.includes(v) || v.includes(b));
-    });
-    if (bstatnMatch.length > 0) return bstatnMatch;
+    // bstatnNm 정확 매칭 실패 = 해당 역 종착 열차 없음 (예: 오금行 없이 마천行만 운행)
+    // through-train 후보: bstatnNm이 passNorm에 없는 열차 = 구간 너머까지 통과하는 열차
+    // 단, 다른 분기 열차와 구분하기 위해 경로 후반부(분기 특화 구간) 역으로 힌트 검증
+    //   인천行 for 천안 route: hint "영등포방면" ∉ tailNorm(["군포","의왕","수원"]) → 제외 ✓
+    //   신창行 for 천안 route: hint "수원방면" ∈ tailNorm → 포함 ✓
+    //   마천行 for 오금 route: hint "거여방면" ∈ tailNorm(["거여","오금"]) → 포함 ✓
+    const tail = passNorm.length > 3
+      ? passNorm.slice(-Math.ceil(passNorm.length / 3))
+      : passNorm;
+
+    if (tail.length > 0) {
+      const throughMatch = filteredPool.filter(a => {
+        const b = normForMatch(a.bstatnNm);
+        if (passNormSet.has(b) && b !== endNorm) return false;
+        const hint = extractHint(a.trainLineNm);
+        return hint !== "" && tail.some(n => hint.includes(n) || n.includes(hint));
+      });
+      if (throughMatch.length > 0) return throughMatch;
+    }
+
+    // tail 힌트 매칭도 실패 → updnLine 방향 보조 (힌트 없는 열차 포착)
+    if (dirStr) {
+      const dirMatch = filteredPool.filter(a => {
+        const b = normForMatch(a.bstatnNm);
+        if (passNormSet.has(b) && b !== endNorm) return false;
+        if (!(a.updnLine ?? "").includes(dirStr)) return false;
+        // 힌트가 있으면 전체 passNorm 대조 (tail 매칭 이미 실패, 완화된 검사)
+        const hint = extractHint(a.trainLineNm);
+        if (hint && passNorm.length > 0)
+          return passNorm.some(n => hint.includes(n) || n.includes(hint));
+        return true;
+      });
+      if (dirMatch.length > 0) return dirMatch;
+    }
+
+    // 모든 매칭 실패 → 해당 분기/방향 열차 없음 → 시간표 fallback
+    return [];
   }
 
-  // ④ 방향(updnLine) 매칭 — 본선 통과행 포착 (행선지 매칭 실패 시)
-  //    상일동→명일: 방화行·김포공항行은 명일行이 아니지만 모두 명일을 통과 → 유효
-  //    ODsay wayCode(1=상행,2=하행)와 Seoul API updnLine 대조.
-  //    단, "방면" 힌트가 있는데 경로상 후속역이 아니면 다른 분기로 가는 열차 → 제외
-  //      강동→하남검단산인데 "마천행 - 둔촌동방면": 둔촌동 ∉ passNorm → 제외 ✓
-  //      상일동→명일인데 "방화행 - 강동방면": 강동 ∈ passNorm → 포함 ✓
-  const dirStr = wayCode === 1 ? "상행" : wayCode === 2 ? "하행" : "";
+  // ④ validSet이 없을 때 (way/endNorm 정보 없음): updnLine + 힌트 매칭
   if (dirStr) {
     const dirMatch = filteredPool.filter(a => {
       if (!(a.updnLine ?? "").includes(dirStr)) return false;
       const hint = extractHint(a.trainLineNm);
-      if (hint && passNorm.length > 0) {
+      if (hint && passNorm.length > 0)
         return passNorm.some(n => hint.includes(n) || n.includes(hint));
-      }
-      return true;  // 힌트 없으면 방향 일치만으로 수용
+      return true;
     });
     if (dirMatch.length > 0) return dirMatch;
   }
 
-  // ⑤ 방면 힌트 매칭 — wayCode 없는 노선(2호선 내/외선 등) fallback
+  // ⑤ wayCode 없는 노선 (2호선 내/외선 등): 힌트만으로 방향 구분
   if (passNorm.length > 0) {
     const hintMatch = filteredPool.filter(a => {
       const hint = extractHint(a.trainLineNm);
@@ -312,8 +345,7 @@ function getDirectionalTrains(
     if (hintMatch.length > 0) return hintMatch;
   }
 
-  // ⑥ 방향 정보가 있었는데 매칭 실패 → 해당 방향 열차 없음 (시간표 fallback)
-  //    방향 정보가 전혀 없으면 pool 전체 (단방향 종점역 등)
+  // ⑥ 방향 정보가 전혀 없으면 pool 전체 반환 (단방향 종점역 등)
   if (!wayNorm && passNorm.length === 0 && !dirStr) return pool;
   return [];
 }
